@@ -1,0 +1,9 @@
+<resources>
+    <dimen name="screen_horizontal_padding">12dp</dimen>
+    <dimen name="status_height">52dp</dimen>
+    <dimen name="song_info_height">72dp</dimen>
+    <dimen name="control_main_size">64dp</dimen>
+    <dimen name="control_secondary_size">48dp</dimen>
+    <dimen name="bottom_status_height">56dp</dimen>
+    <dimen name="touch_min_size">44dp</dimen>
+</resources>

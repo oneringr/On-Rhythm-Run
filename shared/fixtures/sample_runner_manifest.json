@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "libraryName": "Morning Run Mix",
+  "generatedAt": "2026-04-10T12:00:00Z",
+  "tracks": [
+    {
+      "id": "8d3f0f5f",
+      "relativePath": "tracks/song-a.mp3",
+      "sourceFileName": "song-a.mp3",
+      "title": "Song A",
+      "artist": "Artist A",
+      "durationMs": 213000,
+      "bpm": 168.4,
+      "energyScore": 0.73,
+      "labels": {
+        "suggested": "excited",
+        "final": "excited"
+      },
+      "suggestedLabel": "excited",
+      "finalLabel": "excited",
+      "sizeBytes": 5342211,
+      "modifiedAt": "2026-04-10T11:21:03Z"
+    },
+    {
+      "id": "b1200c21",
+      "relativePath": "tracks/song-b.mp3",
+      "sourceFileName": "song-b.mp3",
+      "title": "Song B",
+      "artist": "Artist B",
+      "durationMs": 240000,
+      "bpm": 102.3,
+      "energyScore": -0.31,
+      "labels": {
+        "suggested": "calm",
+        "final": "calm"
+      },
+      "suggestedLabel": "calm",
+      "finalLabel": "calm",
+      "sizeBytes": 4832211,
+      "modifiedAt": "2026-04-09T08:05:33Z"
+    }
+  ]
+}

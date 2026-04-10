@@ -1,0 +1,10 @@
+<resources>
+    <color name="midnight">#0A1A24</color>
+    <color name="ocean">#12374B</color>
+    <color name="foam">#E8F6F3</color>
+    <color name="mint">#77D6B2</color>
+    <color name="salmon">#FF8C6B</color>
+    <color name="slate">#5E7482</color>
+    <color name="surface">#10222E</color>
+    <color name="surface_alt">#173241</color>
+</resources>

@@ -1,0 +1,26 @@
+<resources>
+    <string name="app_name">跑者智能播放器</string>
+    <string name="player">播放</string>
+    <string name="run_mode">跑步</string>
+    <string name="library">曲库</string>
+    <string name="adaptive_mode">自适应模式</string>
+    <string name="threshold_description">心率连续 10 个稳定样本达到或超过 180 BPM 时切换到激动模式。</string>
+    <string name="sensor_unavailable">心率传感器不可用</string>
+    <string name="rescan_library">重新扫描曲库</string>
+    <string name="library_path">曲库路径</string>
+    <string name="mode_calm">模式：舒缓</string>
+    <string name="placeholder_bpm">-- BPM</string>
+    <string name="no_song_loaded">尚未载入歌曲</string>
+    <string name="scan_library_hint">请先扫描并导入曲库</string>
+    <string name="status_ready">准备就绪</string>
+    <string name="current_heart_rate">当前心率</string>
+    <string name="current_playback_mode">当前播放模式</string>
+    <string name="label_calm">舒缓</string>
+    <string name="total_tracks">歌曲总数</string>
+    <string name="calm_excited_count">舒缓 / 激动</string>
+    <string name="last_import">最近导入</string>
+    <string name="no_export_found">未发现导出曲库</string>
+    <string name="previous">上一首</string>
+    <string name="play_pause">播放 / 暂停</string>
+    <string name="next">下一首</string>
+</resources>

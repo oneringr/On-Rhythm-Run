@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://runner-smart-player.local/schema/runner_manifest.schema.json",
+  "title": "Runner Smart Player Manifest",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "libraryName",
+    "generatedAt",
+    "tracks"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "libraryName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "tracks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "relativePath",
+          "sourceFileName",
+          "durationMs",
+          "labels",
+          "sizeBytes",
+          "modifiedAt"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "relativePath": { "type": "string", "minLength": 1 },
+          "sourceFileName": { "type": "string", "minLength": 1 },
+          "title": { "type": "string" },
+          "artist": { "type": "string" },
+          "durationMs": { "type": "integer", "minimum": 1 },
+          "bpm": { "type": "number", "minimum": 0 },
+          "energyScore": { "type": "number" },
+          "labels": {
+            "type": "object",
+            "required": ["suggested", "final"],
+            "properties": {
+              "suggested": {
+                "type": "string",
+                "enum": ["calm", "excited"]
+              },
+              "final": {
+                "type": "string",
+                "enum": ["calm", "excited"]
+              }
+            },
+            "additionalProperties": false
+          },
+          "suggestedLabel": {
+            "type": "string",
+            "enum": ["calm", "excited"]
+          },
+          "finalLabel": {
+            "type": "string",
+            "enum": ["calm", "excited"]
+          },
+          "sizeBytes": { "type": "integer", "minimum": 1 },
+          "modifiedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,14 @@
+/.gradle/
+/build/
+/watch-app/build/
+/local.properties
+/pc-app/dist/
+/pc-app/dist-electron/
+/pc-app/out/
+/pc-app/node_modules/
+/pc-app/.vite/
+/pc-app/coverage/
+*.iml
+.idea/
+.DS_Store
+Thumbs.db
