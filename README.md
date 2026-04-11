@@ -23,6 +23,7 @@
 - 支持通过 ADB 一键推送歌曲或完整曲库
 - 支持浏览 `/sdcard/Music` 并做简单文件管理
 - 支持打包为 Windows 便携版发布包
+- 渲染层已拆分为 hooks + components，便于维护与后续测试扩展
 
 ### 手表端
 
@@ -35,6 +36,7 @@
 - 支持播放页环形进度、音量控制、跑马灯标题
 - 读取心率传感器并按阈值切换 `舒缓 / 激动`
 - 支持 Debug 模式，停用传感器后可长按播放键手动切换模式
+- 播放服务已拆分为 `PlaybackController / AdaptiveModeManager / NotificationController`
 
 ## 仓库结构
 
@@ -46,6 +48,25 @@ On-Rhythm-Run/
     schema/               runner_manifest.json schema
   gradlew / gradlew.bat   Gradle Wrapper
 ```
+
+## 架构现状
+
+- `pc-app/renderer`：UI 已拆分为 `hooks + components`，`App.tsx` 只负责组合与快捷键分发
+- `pc-app/main`：Electron 主进程继续负责扫描、分析、导出、ADB 与 IPC 边界
+- `watch-app/player`：播放、模式切换、通知逻辑已从 Service 中拆分为独立类
+- `watch-app/state`：`UiStateStore` 通过 `StateStore` 接口暴露，状态写入归属更清晰
+- `shared/schema`：双端继续共享 `runner_manifest.json` 协议
+
+## 最近验证
+
+- PC 端已通过：`npm test`、`npm run build`
+- 手表端已通过：`.\gradlew.bat :watch-app:testDebugUnitTest`、`.\gradlew.bat :watch-app:lintDebug`
+- 真机 ADB 验证已通过：
+  - 设备：`OW20W3`
+  - 应用冷启动正常
+  - 可读取 `/sdcard/Music/RunnerPlayerExport`
+  - 可开始播放并切换到下一首
+  - 未观察到 `AndroidRuntime` 崩溃或明显 `PlaybackException`
 
 ## 功能说明
 
@@ -195,8 +216,8 @@ pc-app/release/
 
 通常会包含：
 
-- `OnRhythmRun-PC-1.0.1-x64.exe`：Windows 便携版
-- `OnRhythmRun-PC-1.0.1-x64.zip`：压缩分发包
+- `OnRhythmRun-PC-1.0.2-x64.exe`：Windows 便携版
+- `OnRhythmRun-PC-1.0.2-x64.zip`：压缩分发包
 
 ### 测试
 
@@ -436,3 +457,4 @@ Remove-Item Env:ELECTRON_RUN_AS_NODE
 - 当前 GitHub Release 中的 PC 包已包含打包白屏和 `ffmpeg.exe ENOENT` 修复
 - 手表端 `release` 已接入 Gradle 签名配置，但 keystore 与口令文件仍只保存在本机
 - 这份仓库目前以 Windows + Android Studio 开发环境为主，其他平台尚未做发布验证
+- 当前发布版本计划为 `v1.0.2`

@@ -1,40 +1,32 @@
 package com.runner.smartplayer.watch.player
 
 import android.Manifest
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioManager
-import android.os.Build
 import android.os.IBinder
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import androidx.core.net.toUri
-import androidx.media.app.NotificationCompat as MediaNotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
-import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.runner.smartplayer.watch.R
+import com.runner.smartplayer.watch.config.PlayerConfig
 import com.runner.smartplayer.watch.data.ManifestLoadResult
+import com.runner.smartplayer.watch.data.ManifestRepository
 import com.runner.smartplayer.watch.model.LocalTrack
 import com.runner.smartplayer.watch.model.PlaybackMode
-import com.runner.smartplayer.watch.model.QueueMode
 import com.runner.smartplayer.watch.model.SensorAvailability
 import com.runner.smartplayer.watch.model.TrackLabel
 import com.runner.smartplayer.watch.model.displayTitle
-import com.runner.smartplayer.watch.sensor.HeartRateSensorController
+import com.runner.smartplayer.watch.sensor.HeartRateController
 import com.runner.smartplayer.watch.state.AppGraph
+import com.runner.smartplayer.watch.state.StateStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -51,29 +43,27 @@ class AdaptivePlaybackService : Service() {
 
     private lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaSessionCompat
-    private lateinit var notificationManager: NotificationManagerCompat
-    private lateinit var queueEngine: AdaptiveQueueEngine
-    private lateinit var heartRateSensorController: HeartRateSensorController
     private lateinit var audioManager: AudioManager
+    private lateinit var stateStore: StateStore
+    private lateinit var manifestRepository: ManifestRepository
+    private lateinit var playerConfig: PlayerConfig
+    private lateinit var heartRateController: HeartRateController
+    private lateinit var playbackController: PlaybackController
+    private lateinit var notificationController: NotificationController
+    private lateinit var modeManager: AdaptiveModeManager
 
-    private var currentTrack: LocalTrack? = null
-    private var adaptiveEnabled: Boolean = true
-    private var debugModeEnabled: Boolean = false
-    private var currentMode: PlaybackMode = PlaybackMode.CALM
-    private var queueMode: QueueMode = QueueMode.SHUFFLE
-    private var fadeJob: Job? = null
     private var loadJob: Job? = null
     private var cachedPlaylist: List<LocalTrack> = emptyList()
     private var cachedVolumePercent: Int = 50
 
     override fun onCreate() {
         super.onCreate()
-        notificationManager = NotificationManagerCompat.from(this)
+        stateStore = AppGraph.uiStateStore
+        manifestRepository = AppGraph.manifestRepository
+        playerConfig = AppGraph.playerConfig
         audioManager = getSystemService(AudioManager::class.java)
         cachedVolumePercent = currentVolumePercent()
-        createNotificationChannel()
 
-        queueEngine = AdaptiveQueueEngine()
         player = ExoPlayer.Builder(this).build().apply {
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
@@ -88,19 +78,50 @@ class AdaptivePlaybackService : Service() {
             setPlaybackState(playbackStateFor(false))
             isActive = true
         }
-        heartRateSensorController = HeartRateSensorController(
-            context = this,
+        playbackController = PlaybackController(
+            player = player,
+            queueEngine = AppGraph.createQueueEngine(),
+            playerConfig = playerConfig,
+        )
+        heartRateController = AppGraph.createHeartRateController(
             onHeartRateSnapshot = { snapshot ->
-                if (!debugModeEnabled) {
-                    AppGraph.uiStateStore.updateHeartRate { snapshot }
+                if (!modeManager.debugModeEnabled) {
+                    stateStore.updateHeartRate { snapshot }
                 }
             },
-            onStableModeChanged = ::onStableModeChanged,
+            onStableModeChanged = { mode ->
+                modeManager.onStableModeChanged(mode, buildAdaptiveModeMessages())
+            },
         )
+        modeManager = AdaptiveModeManager(
+            serviceScope = serviceScope,
+            stateStore = stateStore,
+            sensorController = heartRateController,
+            onRefreshPlaylist = ::refreshPlaylistCache,
+            onResetPlaybackVolume = playbackController::resetVolume,
+            onCurrentTrackLabel = { playbackController.currentTrack?.finalLabel },
+            onHasTracksForLabel = playbackController::hasTracksForLabel,
+            onNextTrackForLabel = playbackController::nextTrackForLabel,
+            onSwitchTrackWithFade = ::switchTrackWithFade,
+            onUpdateMessage = { message ->
+                updatePlaybackSnapshot(message)
+                updateNotification()
+            },
+            onPublishDebugHeartRateSnapshot = ::publishDebugHeartRateSnapshot,
+        )
+        notificationController = NotificationController(
+            context = this,
+            mediaSession = mediaSession,
+            playerConfig = playerConfig,
+        )
+        notificationController.createChannel()
 
-        startForeground(NOTIFICATION_ID, buildNotification())
+        startForeground(
+            playerConfig.notificationId,
+            notificationController.build(currentNotificationState()),
+        )
         loadLibrary()
-        heartRateSensorController.start()
+        heartRateController.start()
         startPlaybackTicker()
     }
 
@@ -113,29 +134,25 @@ class AdaptivePlaybackService : Service() {
             ServiceIntents.ACTION_PREVIOUS -> playPrevious()
             ServiceIntents.ACTION_RESCAN -> loadLibrary()
             ServiceIntents.ACTION_TOGGLE_ADAPTIVE -> {
-                adaptiveEnabled = intent.getBooleanExtra(
-                    ServiceIntents.EXTRA_ADAPTIVE_ENABLED,
-                    adaptiveEnabled,
-                )
-                AppGraph.uiStateStore.setAdaptiveEnabled(adaptiveEnabled)
-                refreshPlaylistCache()
-                updatePlaybackSnapshot(
-                    getString(
-                        if (adaptiveEnabled) {
-                            R.string.message_adaptive_enabled
-                        } else {
-                            R.string.message_adaptive_disabled
-                        }
-                    )
+                modeManager.setAdaptiveEnabled(
+                    intent.getBooleanExtra(
+                        ServiceIntents.EXTRA_ADAPTIVE_ENABLED,
+                        modeManager.adaptiveEnabled,
+                    ),
+                    buildAdaptiveModeMessages(),
                 )
             }
             ServiceIntents.ACTION_TOGGLE_DEBUG_MODE -> {
-                setDebugModeEnabled(
-                    intent.getBooleanExtra(ServiceIntents.EXTRA_DEBUG_ENABLED, !debugModeEnabled)
+                modeManager.setDebugModeEnabled(
+                    intent.getBooleanExtra(
+                        ServiceIntents.EXTRA_DEBUG_ENABLED,
+                        !modeManager.debugModeEnabled,
+                    ),
+                    buildAdaptiveModeMessages(),
                 )
             }
             ServiceIntents.ACTION_TOGGLE_DEBUG_PLAYBACK_MODE -> {
-                toggleDebugPlaybackMode()
+                modeManager.toggleDebugPlaybackMode(buildAdaptiveModeMessages())
             }
             ServiceIntents.ACTION_VOLUME_UP -> {
                 audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, 0)
@@ -148,16 +165,14 @@ class AdaptivePlaybackService : Service() {
                 updatePlaybackSnapshot(getString(R.string.message_volume_percent, cachedVolumePercent))
             }
             ServiceIntents.ACTION_CYCLE_QUEUE_MODE -> {
-                queueMode = queueMode.next()
-                if (queueMode == QueueMode.SHUFFLE) {
-                    queueEngine.reshuffleAll(currentTrack)
-                }
+                playbackController.cycleQueueMode()
                 refreshPlaylistCache()
-                updatePlaybackSnapshot(getString(R.string.message_queue_mode, queueMode.label()))
+                updatePlaybackSnapshot(
+                    getString(R.string.message_queue_mode, playbackController.queueMode.label())
+                )
             }
             ServiceIntents.ACTION_PLAY_TRACK_BY_ID -> {
-                val trackId = intent.getStringExtra(ServiceIntents.EXTRA_TRACK_ID)
-                playTrackById(trackId)
+                playTrackById(intent.getStringExtra(ServiceIntents.EXTRA_TRACK_ID))
             }
         }
         updateNotification()
@@ -167,8 +182,8 @@ class AdaptivePlaybackService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        heartRateSensorController.stop()
-        fadeJob?.cancel()
+        heartRateController.stop()
+        modeManager.cancel()
         loadJob?.cancel()
         player.removeListener(playbackListener)
         player.release()
@@ -180,7 +195,7 @@ class AdaptivePlaybackService : Service() {
     private fun loadLibrary() {
         loadJob?.cancel()
         loadJob = serviceScope.launch(Dispatchers.IO) {
-            val result = AppGraph.manifestRepository.loadLibrary()
+            val result = manifestRepository.loadLibrary()
             withContext(Dispatchers.Main.immediate) {
                 when (result) {
                     is ManifestLoadResult.Error -> {
@@ -193,15 +208,14 @@ class AdaptivePlaybackService : Service() {
                             TAG,
                             "Loaded library ${result.library.libraryName} with ${result.library.tracks.size} tracks",
                         )
-                        queueEngine.load(result.library.tracks)
-                        AppGraph.uiStateStore.updateLibrary(result.summary)
-                        if (currentTrack != null && result.library.tracks.none { it.id == currentTrack?.id }) {
-                            currentTrack = null
-                            player.stop()
-                            player.clearMediaItems()
-                        }
-                        if (currentTrack == null) {
-                            val firstTrack = nextTrackForCurrentContext(autoAdvance = false)
+                        playbackController.load(result.library.tracks)
+                        stateStore.updateLibrary(result.summary)
+                        playbackController.syncCurrentTrack(result.library.tracks)
+                        if (playbackController.currentTrack == null) {
+                            val firstTrack = playbackController.nextTrack(
+                                activeQueueLabel(),
+                                autoAdvance = false,
+                            )
                             prepareTrack(
                                 firstTrack,
                                 playImmediately = false,
@@ -219,9 +233,13 @@ class AdaptivePlaybackService : Service() {
     }
 
     private fun togglePlayback() {
-        if (currentTrack == null) {
-            val seedTrack = nextTrackForCurrentContext(autoAdvance = false)
-            prepareTrack(seedTrack, playImmediately = true, reason = getString(R.string.message_start_playback))
+        if (playbackController.currentTrack == null) {
+            val seedTrack = playbackController.nextTrack(activeQueueLabel(), autoAdvance = false)
+            prepareTrack(
+                seedTrack,
+                playImmediately = true,
+                reason = getString(R.string.message_start_playback),
+            )
             return
         }
 
@@ -229,15 +247,12 @@ class AdaptivePlaybackService : Service() {
             player.pause()
             updatePlaybackSnapshot(getString(R.string.message_paused))
         } else {
-            if (player.playbackState == Player.STATE_IDLE) {
-                currentTrack?.let { track ->
-                    prepareTrack(
-                        track,
-                        playImmediately = true,
-                        reason = getString(R.string.message_start_playback),
-                    )
-                    return
-                }
+            if (playbackController.restartCurrentTrackIfIdle(startPlayback = true)) {
+                refreshPlaylistCache()
+                updatePlaybackSnapshot(getString(R.string.message_start_playback))
+                mediaSession.setPlaybackState(playbackStateFor(true))
+                updateNotification()
+                return
             }
             player.play()
             updatePlaybackSnapshot(getString(R.string.message_playing))
@@ -246,8 +261,8 @@ class AdaptivePlaybackService : Service() {
     }
 
     private fun playNext(autoAdvance: Boolean = false) {
-        val nextTrack = nextTrackForCurrentContext(autoAdvance = autoAdvance)
-        val reason = if (autoAdvance && queueMode == QueueMode.SINGLE_REPEAT) {
+        val nextTrack = playbackController.nextTrack(activeQueueLabel(), autoAdvance)
+        val reason = if (autoAdvance && playbackController.queueMode == com.runner.smartplayer.watch.model.QueueMode.SINGLE_REPEAT) {
             getString(R.string.message_single_repeat)
         } else {
             getString(R.string.message_next_track)
@@ -256,7 +271,7 @@ class AdaptivePlaybackService : Service() {
     }
 
     private fun playPrevious() {
-        val previousTrack = previousTrackForCurrentContext()
+        val previousTrack = playbackController.previousTrack(activeQueueLabel())
         prepareTrack(
             previousTrack,
             playImmediately = true,
@@ -265,22 +280,12 @@ class AdaptivePlaybackService : Service() {
     }
 
     private fun playTrackById(trackId: String?) {
-        if (trackId.isNullOrBlank()) {
-            updatePlaybackSnapshot(getString(R.string.message_track_not_found))
-            return
-        }
-
-        val targetTrack = queueEngine.findTrackById(trackId)
+        val targetTrack = playbackController.selectTrackById(trackId, activeQueueLabel())
         if (targetTrack == null) {
             updatePlaybackSnapshot(getString(R.string.message_track_not_found))
             return
         }
 
-        queueEngine.selectTrack(
-            track = targetTrack,
-            current = currentTrack,
-            activeLabel = activeQueueLabel(),
-        )
         prepareTrack(
             targetTrack,
             playImmediately = true,
@@ -288,139 +293,29 @@ class AdaptivePlaybackService : Service() {
         )
     }
 
-    private fun onStableModeChanged(mode: PlaybackMode) {
-        if (debugModeEnabled) return
-        applyPlaybackMode(
-            mode,
-            getString(R.string.message_heart_rate_settled_mode, mode.toLabel().label()),
-        )
-    }
-
-    private fun setDebugModeEnabled(enabled: Boolean) {
-        if (debugModeEnabled == enabled) {
-            updatePlaybackSnapshot(
-                if (enabled) {
-                    getString(R.string.message_debug_enabled_hint)
-                } else {
-                    getString(R.string.message_debug_disabled)
-                }
-            )
-            return
-        }
-
-        debugModeEnabled = enabled
-        AppGraph.uiStateStore.setDebugModeEnabled(enabled)
-        if (enabled) {
-            fadeJob?.cancel()
-            fadeJob = null
-            player.volume = 1f
-            heartRateSensorController.stop()
-            publishDebugHeartRateSnapshot()
-            updatePlaybackSnapshot(getString(R.string.message_debug_enabled_hint))
-        } else {
-            currentMode = PlaybackMode.CALM
-            AppGraph.uiStateStore.setPlaybackMode(PlaybackMode.CALM)
-            refreshPlaylistCache()
-            heartRateSensorController.resetClassifier()
-            heartRateSensorController.start()
-            updatePlaybackSnapshot(getString(R.string.message_debug_disabled_restore))
-        }
-    }
-
-    private fun toggleDebugPlaybackMode() {
-        if (!debugModeEnabled) {
-            updatePlaybackSnapshot(getString(R.string.message_enable_debug_first))
-            return
-        }
-
-        val nextMode = when (currentMode) {
-            PlaybackMode.CALM -> PlaybackMode.EXCITED
-            PlaybackMode.EXCITED -> PlaybackMode.CALM
-        }
-        if (!adaptiveEnabled) {
-            currentMode = nextMode
-            AppGraph.uiStateStore.setPlaybackMode(nextMode)
-            publishDebugHeartRateSnapshot()
-            updatePlaybackSnapshot(
-                getString(R.string.message_debug_switched_mode_no_adaptive, nextMode.toLabel().label())
-            )
-            return
-        }
-        applyPlaybackMode(
-            nextMode,
-            getString(R.string.message_debug_switched_mode, nextMode.toLabel().label()),
-        )
-    }
-
-    private fun applyPlaybackMode(mode: PlaybackMode, settledMessage: String) {
-        currentMode = mode
-        AppGraph.uiStateStore.setPlaybackMode(mode)
-        if (debugModeEnabled) {
-            publishDebugHeartRateSnapshot()
-        }
-        if (!adaptiveEnabled) {
-            updatePlaybackSnapshot(settledMessage)
-            return
-        }
-
-        val targetLabel = mode.toLabel()
-        refreshPlaylistCache()
-        if (currentTrack?.finalLabel == targetLabel) {
-            updatePlaybackSnapshot(settledMessage)
-            return
-        }
-
-        if (!queueEngine.hasLabel(targetLabel)) {
-            updatePlaybackSnapshot(getString(R.string.message_no_tracks_for_label, targetLabel.label()))
-            return
-        }
-
-        val targetTrack = nextTrackForLabel(
-            label = targetLabel,
-            repeatCurrent = false,
-        )
-        fadeJob?.cancel()
-        fadeJob = serviceScope.launch {
-            switchTrackWithFade(targetTrack, settledMessage)
-        }
-    }
-
-    private fun publishDebugHeartRateSnapshot() {
-        AppGraph.uiStateStore.updateHeartRate {
+    private fun publishDebugHeartRateSnapshot(mode: PlaybackMode, message: String) {
+        stateStore.updateHeartRate {
             it.copy(
                 bpm = null,
-                mode = currentMode,
+                mode = mode,
                 availability = SensorAvailability.STOPPED,
-                message = getString(R.string.message_debug_heart_rate),
+                message = message,
             )
         }
     }
 
     private suspend fun switchTrackWithFade(track: LocalTrack?, reason: String) {
-        if (track == null) return
-        val wasPlaying = player.isPlaying
-        if (wasPlaying) {
-            fadeVolume(from = player.volume, to = 0f)
+        if (!playbackController.switchTrackWithFade(track)) {
+            return
         }
-        prepareTrack(track, playImmediately = wasPlaying, reason = reason)
-        player.volume = if (wasPlaying) 0f else 1f
-        if (wasPlaying) {
-            fadeVolume(from = 0f, to = 1f)
-        }
-    }
-
-    private suspend fun fadeVolume(from: Float, to: Float) {
-        val steps = 12
-        val delta = (to - from) / steps
-        repeat(steps) { step ->
-            player.volume = from + delta * (step + 1)
-            delay(50L)
-        }
-        player.volume = to
+        refreshPlaylistCache()
+        updatePlaybackSnapshot(reason)
+        mediaSession.setPlaybackState(playbackStateFor(player.isPlaying))
+        updateNotification()
     }
 
     private fun prepareTrack(track: LocalTrack?, playImmediately: Boolean, reason: String) {
-        if (track == null) {
+        if (!playbackController.prepareTrack(track, playImmediately)) {
             Log.w(TAG, "prepareTrack called with null track")
             refreshPlaylistCache()
             updatePlaybackSnapshot(getString(R.string.message_no_tracks_available))
@@ -430,88 +325,29 @@ class AdaptivePlaybackService : Service() {
 
         Log.d(
             TAG,
-            "Preparing track: ${track.displayTitle()} (${track.file.absolutePath}), playImmediately=$playImmediately",
+            "Preparing track: ${playbackController.currentTrack?.displayTitle()}, playImmediately=$playImmediately",
         )
-        currentTrack = track
         refreshPlaylistCache()
-        val mediaItem = MediaItem.Builder()
-            .setUri(track.file.toUri())
-            .setMediaId(track.id)
-            .build()
-        player.stop()
-        player.clearMediaItems()
-        player.setMediaItem(mediaItem)
-        player.playWhenReady = playImmediately
-        player.prepare()
-
         updatePlaybackSnapshot(reason)
         mediaSession.setPlaybackState(playbackStateFor(playImmediately))
         updateNotification()
     }
 
-    private fun nextTrackForCurrentContext(autoAdvance: Boolean): LocalTrack? {
-        val label = activeQueueLabel()
-        return if (label != null) {
-            nextTrackForLabel(label, repeatCurrent = queueMode == QueueMode.SINGLE_REPEAT && autoAdvance)
-        } else {
-            queueEngine.nextCombined(
-                current = currentTrack,
-                queueMode = queueMode,
-                repeatCurrent = queueMode == QueueMode.SINGLE_REPEAT && autoAdvance,
-            )
-        }
-    }
-
-    private fun nextTrackForLabel(
-        label: TrackLabel,
-        repeatCurrent: Boolean,
-    ): LocalTrack? {
-        return queueEngine.nextForLabel(
-            label = label,
-            current = currentTrack,
-            queueMode = queueMode,
-            repeatCurrent = repeatCurrent,
+    private fun activeQueueLabel(): TrackLabel? {
+        return playbackController.activeQueueLabel(
+            currentMode = modeManager.currentMode,
+            adaptiveEnabled = modeManager.adaptiveEnabled,
         )
     }
 
-    private fun previousTrackForCurrentContext(): LocalTrack? {
-        val label = activeQueueLabel()
-        return if (label != null) {
-            queueEngine.previousForLabel(label, currentTrack, queueMode)
-        } else {
-            queueEngine.previousCombined(currentTrack, queueMode)
-        }
-    }
-
-    private fun activeQueueLabel(): TrackLabel? {
-        if (!adaptiveEnabled) return null
-
-        val preferred = currentMode.toLabel()
-        if (queueEngine.hasLabel(preferred)) {
-            return preferred
-        }
-
-        val fallback = currentTrack?.finalLabel
-        return if (fallback != null && queueEngine.hasLabel(fallback)) fallback else null
-    }
-
-    private fun currentPlaylist(): List<LocalTrack> {
-        val label = activeQueueLabel()
-        return if (label != null) {
-            queueEngine.playlistForLabel(label, queueMode)
-        } else {
-            queueEngine.playlistForCombined(queueMode)
-        }
-    }
-
     private fun refreshPlaylistCache() {
-        cachedPlaylist = currentPlaylist()
+        cachedPlaylist = playbackController.currentPlaylist(activeQueueLabel())
     }
 
     private fun updatePlaybackSnapshot(message: String? = null) {
         val durationMs = player.duration
             .takeIf { it > 0 }
-            ?: currentTrack?.durationMs
+            ?: playbackController.currentTrack?.durationMs
             ?: 0L
         val positionMs = player.currentPosition.coerceAtLeast(0L).coerceAtMost(durationMs)
         val progressPercent = if (durationMs > 0) {
@@ -519,25 +355,46 @@ class AdaptivePlaybackService : Service() {
         } else {
             0f
         }
-        val playlist = cachedPlaylist
 
-        AppGraph.uiStateStore.updatePlayback { snapshot ->
+        stateStore.updatePlayback { snapshot ->
             snapshot.copy(
-                currentTrack = currentTrack,
+                currentTrack = playbackController.currentTrack,
                 isPlaying = player.isPlaying,
-                isAdaptiveEnabled = adaptiveEnabled,
-                isDebugModeEnabled = debugModeEnabled,
-                playbackMode = currentMode,
+                isAdaptiveEnabled = modeManager.adaptiveEnabled,
+                isDebugModeEnabled = modeManager.debugModeEnabled,
+                playbackMode = modeManager.currentMode,
                 lastMessage = message ?: snapshot.lastMessage,
-                displayTitle = currentTrack?.displayTitle() ?: getString(R.string.track_not_ready),
+                displayTitle = playbackController.currentTrack?.displayTitle()
+                    ?: getString(R.string.track_not_ready),
                 durationMs = durationMs,
                 positionMs = positionMs,
                 progressPercent = progressPercent,
                 volumePercent = cachedVolumePercent,
-                queueMode = queueMode,
-                playlistTracks = playlist,
+                queueMode = playbackController.queueMode,
+                playlistTracks = cachedPlaylist,
             )
         }
+    }
+
+    private fun currentNotificationState(): NotificationState {
+        return NotificationState(
+            trackTitle = playbackController.currentTrack?.displayTitle(),
+            isPlaying = player.isPlaying,
+            modeLabel = modeManager.currentMode.toLabel().label(),
+            queueModeLabel = playbackController.queueMode.label(),
+        )
+    }
+
+    private fun updateNotification() {
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) != PackageManager.PERMISSION_GRANTED &&
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU
+        ) {
+            return
+        }
+        notificationController.update(currentNotificationState())
     }
 
     private fun currentVolumePercent(): Int {
@@ -552,88 +409,12 @@ class AdaptivePlaybackService : Service() {
             while (isActive) {
                 if (player.isPlaying) {
                     updatePlaybackSnapshot()
-                    delay(300L)
+                    delay(playerConfig.tickerIntervalPlayingMs)
                 } else {
-                    delay(1000L)
+                    delay(playerConfig.tickerIntervalIdleMs)
                 }
             }
         }
-    }
-
-    private fun buildNotification(): Notification {
-        val contentIntent = PendingIntent.getActivity(
-            this,
-            1,
-            Intent(this, com.runner.smartplayer.watch.ui.MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val previousAction = NotificationCompat.Action(
-            R.drawable.ic_skip_previous,
-            getString(R.string.previous),
-            pendingServiceAction(ServiceIntents.ACTION_PREVIOUS, 2),
-        )
-        val playPauseAction = NotificationCompat.Action(
-            if (player.isPlaying) R.drawable.ic_pause else R.drawable.ic_play,
-            getString(if (player.isPlaying) R.string.pause else R.string.play),
-            pendingServiceAction(ServiceIntents.ACTION_TOGGLE_PLAY, 3),
-        )
-        val nextAction = NotificationCompat.Action(
-            R.drawable.ic_skip_next,
-            getString(R.string.next),
-            pendingServiceAction(ServiceIntents.ACTION_NEXT, 4),
-        )
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(currentTrack?.displayTitle() ?: getString(R.string.app_name))
-            .setContentText(
-                getString(
-                    R.string.notification_content_format,
-                    currentMode.toLabel().label(),
-                    queueMode.label(),
-                )
-            )
-            .setContentIntent(contentIntent)
-            .setOnlyAlertOnce(true)
-            .setOngoing(player.isPlaying)
-            .setStyle(MediaNotificationCompat.MediaStyle().setMediaSession(mediaSession.sessionToken))
-            .addAction(previousAction)
-            .addAction(playPauseAction)
-            .addAction(nextAction)
-            .build()
-    }
-
-    private fun updateNotification() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.POST_NOTIFICATIONS,
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            Log.d(TAG, "Skip notification update because POST_NOTIFICATIONS is not granted")
-            return
-        }
-        runCatching {
-            notificationManager.notify(NOTIFICATION_ID, buildNotification())
-        }.onFailure { throwable ->
-            if (throwable is SecurityException) {
-                Log.w(TAG, "Failed to post playback notification", throwable)
-            } else {
-                throw throwable
-            }
-        }
-    }
-
-    private fun pendingServiceAction(action: String, requestCode: Int): PendingIntent {
-        val intent = Intent(this, AdaptivePlaybackService::class.java).apply {
-            this.action = action
-        }
-        return PendingIntent.getService(
-            this,
-            requestCode,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
     }
 
     private fun playbackStateFor(isPlaying: Boolean): PlaybackStateCompat {
@@ -646,6 +427,30 @@ class AdaptivePlaybackService : Service() {
             .setActions(actions)
             .setState(state, player.currentPosition, 1f)
             .build()
+    }
+
+    private fun buildAdaptiveModeMessages(): AdaptiveModeMessages {
+        return AdaptiveModeMessages(
+            adaptiveEnabled = getString(R.string.message_adaptive_enabled),
+            adaptiveDisabled = getString(R.string.message_adaptive_disabled),
+            debugEnabledHint = getString(R.string.message_debug_enabled_hint),
+            debugDisabled = getString(R.string.message_debug_disabled),
+            debugDisabledRestore = getString(R.string.message_debug_disabled_restore),
+            enableDebugFirst = getString(R.string.message_enable_debug_first),
+            debugHeartRate = getString(R.string.message_debug_heart_rate),
+            settledMode = { mode ->
+                getString(R.string.message_heart_rate_settled_mode, mode.toLabel().label())
+            },
+            debugSwitchedMode = { mode ->
+                getString(R.string.message_debug_switched_mode, mode.toLabel().label())
+            },
+            debugSwitchedModeNoAdaptive = { mode ->
+                getString(R.string.message_debug_switched_mode_no_adaptive, mode.toLabel().label())
+            },
+            noTracksForLabel = { label ->
+                getString(R.string.message_no_tracks_for_label, label.label())
+            },
+        )
     }
 
     private val playbackListener = object : Player.Listener {
@@ -668,7 +473,7 @@ class AdaptivePlaybackService : Service() {
             when (playbackState) {
                 Player.STATE_BUFFERING -> updatePlaybackSnapshot(getString(R.string.message_buffering_audio))
                 Player.STATE_READY -> {
-                    if (!player.isPlaying && currentTrack != null) {
+                    if (!player.isPlaying && playbackController.currentTrack != null) {
                         updatePlaybackSnapshot(getString(R.string.message_ready_tap_to_play))
                     } else {
                         updatePlaybackSnapshot()
@@ -681,7 +486,7 @@ class AdaptivePlaybackService : Service() {
         }
 
         override fun onPlayerError(error: PlaybackException) {
-            val failingTrack = currentTrack
+            val failingTrack = playbackController.currentTrack
             Log.e(TAG, "Playback error for ${failingTrack?.file?.absolutePath}", error)
             updatePlaybackSnapshot(
                 buildString {
@@ -700,20 +505,7 @@ class AdaptivePlaybackService : Service() {
         }
     }
 
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            getString(R.string.notification_channel_playback),
-            NotificationManager.IMPORTANCE_LOW,
-        )
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(channel)
-    }
-
     companion object {
         private const val TAG = "RunnerSmartPlayer"
-        private const val CHANNEL_ID = "runner_player_playback"
-        private const val NOTIFICATION_ID = 1001
     }
 }

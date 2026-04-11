@@ -18,14 +18,14 @@ class HeartRateSensorController(
     private val classifier: HeartRateModeClassifier = HeartRateModeClassifier(),
     private val onHeartRateSnapshot: (HeartRateSnapshot) -> Unit,
     private val onStableModeChanged: (PlaybackMode) -> Unit,
-) : SensorEventListener {
+) : HeartRateController, SensorEventListener {
     private val appContext = context.applicationContext
     private val sensorManager = appContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val heartRateSensor = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
     private var sensorAccuracy: Int = SensorManager.SENSOR_STATUS_UNRELIABLE
     private var started = false
 
-    fun start() {
+    override fun start() {
         when {
             !hasPermission() -> publishSnapshot(null, SensorAvailability.PERMISSION_REQUIRED)
             heartRateSensor == null -> publishSnapshot(null, SensorAvailability.NO_SENSOR)
@@ -44,7 +44,7 @@ class HeartRateSensorController(
         }
     }
 
-    fun stop() {
+    override fun stop() {
         if (started) {
             sensorManager.unregisterListener(this)
             started = false
@@ -52,7 +52,7 @@ class HeartRateSensorController(
         publishSnapshot(null, SensorAvailability.STOPPED)
     }
 
-    fun resetClassifier(mode: PlaybackMode = PlaybackMode.CALM) {
+    override fun resetClassifier(mode: PlaybackMode) {
         classifier.reset(mode)
     }
 
@@ -63,12 +63,11 @@ class HeartRateSensorController(
             SensorManager.SENSOR_STATUS_UNRELIABLE -> SensorAvailability.UNRELIABLE
             else -> SensorAvailability.AVAILABLE
         }
-        publishSnapshot(bpm, availability)
-
         val modeChanged = classifier.submitSample(
             bpm = bpm,
             sensorReady = availability == SensorAvailability.AVAILABLE,
         )
+        publishSnapshot(bpm, availability)
         if (modeChanged != null) {
             onStableModeChanged(modeChanged)
         }

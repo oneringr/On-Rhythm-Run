@@ -1,10 +1,11 @@
 package com.runner.smartplayer.watch.sensor
 
+import com.runner.smartplayer.watch.config.DEFAULT_PLAYER_CONFIG
 import com.runner.smartplayer.watch.model.PlaybackMode
 
 class HeartRateModeClassifier(
-    private val threshold: Int = 180,
-    private val stableSamples: Int = 10,
+    private val threshold: Int = DEFAULT_PLAYER_CONFIG.heartRateThreshold,
+    private val stableSamples: Int = DEFAULT_PLAYER_CONFIG.stableSampleCount,
 ) {
     private var aboveThresholdCount = 0
     private var belowThresholdCount = 0
