@@ -1,6 +1,7 @@
 package com.runner.smartplayer.watch.player
 
 import android.Manifest
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -9,7 +10,10 @@ import android.os.IBinder
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
+import android.view.KeyEvent
 import androidx.core.content.ContextCompat
+import androidx.core.os.BundleCompat
+import androidx.media.session.MediaButtonReceiver
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
@@ -75,6 +79,21 @@ class AdaptivePlaybackService : Service() {
             addListener(playbackListener)
         }
         mediaSession = MediaSessionCompat(this, "RunnerSmartPlayerSession").apply {
+            setFlags(
+                MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
+                    MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
+            )
+            setCallback(mediaSessionCallback)
+            val mediaButtonIntent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+                setClass(this@AdaptivePlaybackService, MediaButtonReceiver::class.java)
+            }
+            val mediaButtonPendingIntent = PendingIntent.getBroadcast(
+                this@AdaptivePlaybackService,
+                0,
+                mediaButtonIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            setMediaButtonReceiver(mediaButtonPendingIntent)
             setPlaybackState(playbackStateFor(false))
             isActive = true
         }
@@ -126,6 +145,12 @@ class AdaptivePlaybackService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == Intent.ACTION_MEDIA_BUTTON) {
+            MediaButtonReceiver.handleIntent(mediaSession, intent)
+            updateNotification()
+            return START_STICKY
+        }
+
         when (intent?.action) {
             null,
             ServiceIntents.ACTION_BOOT -> Unit
@@ -233,6 +258,14 @@ class AdaptivePlaybackService : Service() {
     }
 
     private fun togglePlayback() {
+        if (player.isPlaying) {
+            pausePlayback()
+        } else {
+            playPlayback()
+        }
+    }
+
+    private fun playPlayback() {
         if (playbackController.currentTrack == null) {
             val seedTrack = playbackController.nextTrack(activeQueueLabel(), autoAdvance = false)
             prepareTrack(
@@ -243,21 +276,28 @@ class AdaptivePlaybackService : Service() {
             return
         }
 
-        if (player.isPlaying) {
-            player.pause()
-            updatePlaybackSnapshot(getString(R.string.message_paused))
-        } else {
-            if (playbackController.restartCurrentTrackIfIdle(startPlayback = true)) {
-                refreshPlaylistCache()
-                updatePlaybackSnapshot(getString(R.string.message_start_playback))
-                mediaSession.setPlaybackState(playbackStateFor(true))
-                updateNotification()
-                return
-            }
+        if (playbackController.restartCurrentTrackIfIdle(startPlayback = true)) {
+            refreshPlaylistCache()
+            updatePlaybackSnapshot(getString(R.string.message_start_playback))
+            mediaSession.setPlaybackState(playbackStateFor(true))
+            updateNotification()
+            return
+        }
+        if (!player.isPlaying) {
             player.play()
             updatePlaybackSnapshot(getString(R.string.message_playing))
+            mediaSession.setPlaybackState(playbackStateFor(true))
         }
-        mediaSession.setPlaybackState(playbackStateFor(player.isPlaying))
+    }
+
+    private fun pausePlayback() {
+        if (!player.isPlaying) {
+            mediaSession.setPlaybackState(playbackStateFor(false))
+            return
+        }
+        player.pause()
+        updatePlaybackSnapshot(getString(R.string.message_paused))
+        mediaSession.setPlaybackState(playbackStateFor(false))
     }
 
     private fun playNext(autoAdvance: Boolean = false) {
@@ -421,6 +461,7 @@ class AdaptivePlaybackService : Service() {
         val state = if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED
         val actions = PlaybackStateCompat.ACTION_PLAY or
             PlaybackStateCompat.ACTION_PAUSE or
+            PlaybackStateCompat.ACTION_PLAY_PAUSE or
             PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
             PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
         return PlaybackStateCompat.Builder()
@@ -502,6 +543,63 @@ class AdaptivePlaybackService : Service() {
                     }
                 }
             )
+        }
+    }
+
+    private val mediaSessionCallback = object : MediaSessionCompat.Callback() {
+        override fun onPlay() {
+            Log.d(TAG, "MediaSession onPlay")
+            playPlayback()
+            updateNotification()
+        }
+
+        override fun onPause() {
+            Log.d(TAG, "MediaSession onPause")
+            pausePlayback()
+            updateNotification()
+        }
+
+        override fun onSkipToNext() {
+            Log.d(TAG, "MediaSession onSkipToNext")
+            playNext()
+            updateNotification()
+        }
+
+        override fun onSkipToPrevious() {
+            Log.d(TAG, "MediaSession onSkipToPrevious")
+            playPrevious()
+            updateNotification()
+        }
+
+        override fun onMediaButtonEvent(mediaButtonEvent: Intent?): Boolean {
+            val event = mediaButtonEvent?.extras?.let { extras ->
+                BundleCompat.getParcelable(extras, Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+            }
+            return when (MediaButtonCommandResolver.resolve(event)) {
+                MediaButtonCommand.PLAY -> {
+                    onPlay()
+                    true
+                }
+                MediaButtonCommand.PAUSE -> {
+                    onPause()
+                    true
+                }
+                MediaButtonCommand.TOGGLE_PLAYBACK -> {
+                    Log.d(TAG, "MediaSession toggle playback from media button")
+                    togglePlayback()
+                    updateNotification()
+                    true
+                }
+                MediaButtonCommand.NEXT -> {
+                    onSkipToNext()
+                    true
+                }
+                MediaButtonCommand.PREVIOUS -> {
+                    onSkipToPrevious()
+                    true
+                }
+                null -> super.onMediaButtonEvent(mediaButtonEvent)
+            }
         }
     }
 

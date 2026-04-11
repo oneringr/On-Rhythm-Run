@@ -30,6 +30,7 @@
 - 从 `/sdcard/Music/RunnerPlayerExport` 读取完整标签曲库
 - 兼容读取 `/sdcard/Music` 根目录或其子目录中的普通 MP3
 - 播放本地 MP3
+- 支持蓝牙耳机 / 媒体键控制 `播放 / 暂停 / 上一曲 / 下一曲`
 - 支持 `随机 / 列表循环 / 单曲循环`
 - 支持长按“随机”按钮弹出播放列表
 - 支持在播放列表中点选切歌
@@ -66,6 +67,7 @@ On-Rhythm-Run/
   - 应用冷启动正常
   - 可读取 `/sdcard/Music/RunnerPlayerExport`
   - 可开始播放并切换到下一首
+  - 可正确响应蓝牙耳机媒体键 `播放 / 暂停 / 上一曲 / 下一曲`
   - 未观察到 `AndroidRuntime` 崩溃或明显 `PlaybackException`
 
 ## 功能说明
@@ -216,8 +218,8 @@ pc-app/release/
 
 通常会包含：
 
-- `OnRhythmRun-PC-1.0.2-x64.exe`：Windows 便携版
-- `OnRhythmRun-PC-1.0.2-x64.zip`：压缩分发包
+- `OnRhythmRun-PC-1.0.3-x64.exe`：Windows 便携版
+- `OnRhythmRun-PC-1.0.3-x64.zip`：压缩分发包
 
 ### 测试
 
@@ -455,6 +457,7 @@ Remove-Item Env:ELECTRON_RUN_AS_NODE
 ## 工程备注
 
 - 当前 GitHub Release 中的 PC 包已包含打包白屏和 `ffmpeg.exe ENOENT` 修复
+- `v1.0.3` 补充了手表端蓝牙耳机媒体键支持，可识别播放、暂停、上一曲、下一曲
 - 手表端 `release` 已接入 Gradle 签名配置，但 keystore 与口令文件仍只保存在本机
 - 这份仓库目前以 Windows + Android Studio 开发环境为主，其他平台尚未做发布验证
-- 当前发布版本计划为 `v1.0.2`
+- 当前发布版本为 `v1.0.3`

@@ -1,6 +1,6 @@
 {
   "name": "runner-smart-player-pc",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "description": "On Rhythm Run Windows desktop companion for music tagging, preview, export, and ADB sync.",
   "author": "OneRingR",
