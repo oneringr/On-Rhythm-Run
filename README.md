@@ -204,8 +204,8 @@ npm test
 
 ```properties
 sdk.dir=C:\\Users\\你的用户名\\AppData\\Local\\Android\\Sdk
-watch.signing.storeFile=D:/path/to/sign-key.jks
-watch.signing.configFile=D:/path/to/config.txt
+watch.signing.storeFile=D\\:/path/to/sign-key.jks
+watch.signing.configFile=D\\:/path/to/config.txt
 ```
 
 示例文件见 [local.properties.example](d:/code/watch-metronome-player/local.properties.example)。
@@ -214,7 +214,7 @@ watch.signing.configFile=D:/path/to/config.txt
 
 - `watch.signing.storeFile` 指向本机 keystore 文件
 - `watch.signing.configFile` 指向单独保存签名口令和 alias 的配置文件
-- Windows 下推荐优先使用正斜杠路径，Gradle 读取更稳定
+- Windows 下请按 `.properties` 规范转义盘符冒号，例如 `D\\:/path/to/file`
 
 `config.txt` 推荐格式如下：
 

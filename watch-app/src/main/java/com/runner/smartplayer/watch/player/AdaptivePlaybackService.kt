@@ -1,11 +1,13 @@
 package com.runner.smartplayer.watch.player
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
@@ -14,6 +16,7 @@ import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.media.app.NotificationCompat as MediaNotificationCompat
 import androidx.media3.common.AudioAttributes
@@ -601,7 +604,24 @@ class AdaptivePlaybackService : Service() {
     }
 
     private fun updateNotification() {
-        notificationManager.notify(NOTIFICATION_ID, buildNotification())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.d(TAG, "Skip notification update because POST_NOTIFICATIONS is not granted")
+            return
+        }
+        runCatching {
+            notificationManager.notify(NOTIFICATION_ID, buildNotification())
+        }.onFailure { throwable ->
+            if (throwable is SecurityException) {
+                Log.w(TAG, "Failed to post playback notification", throwable)
+            } else {
+                throw throwable
+            }
+        }
     }
 
     private fun pendingServiceAction(action: String, requestCode: Int): PendingIntent {
