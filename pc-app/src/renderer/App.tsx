@@ -36,6 +36,7 @@ export default function App() {
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const [isPreviewScrubbing, setIsPreviewScrubbing] = useState(false);
   const [activePreviewTrackId, setActivePreviewTrackId] = useState("");
+  const [autoAdvanceOnLabelChange, setAutoAdvanceOnLabelChange] = useState(true);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const exportableTracks = useMemo(
@@ -43,6 +44,10 @@ export default function App() {
     [tracks],
   );
   const hasPreviewTrack = activePreviewTrackId !== "";
+  const activePreviewTrackIndex = useMemo(
+    () => tracks.findIndex((track) => track.id === activePreviewTrackId),
+    [activePreviewTrackId, tracks],
+  );
 
   const stats = useMemo(() => {
     const calm = exportableTracks.filter((track) => track.finalLabel === "calm").length;
@@ -380,7 +385,7 @@ export default function App() {
     }
   }, []);
 
-  async function togglePreviewPlayback() {
+  const togglePreviewPlayback = useCallback(async () => {
     const audioElement = audioRef.current;
     if (!audioElement || !audioElement.src) {
       setStatus("请先选择一首歌曲试听。");
@@ -396,15 +401,47 @@ export default function App() {
     } catch (error) {
       setStatus(toErrorMessage(error, "试听播放失败。"));
     }
-  }
+  }, []);
 
-  function seekPreview(nextPosition: number) {
+  const seekPreview = useCallback((nextPosition: number) => {
     const audioElement = audioRef.current;
     setPreviewPosition(nextPosition);
     if (audioElement) {
       audioElement.currentTime = nextPosition;
     }
-  }
+  }, []);
+
+  const previewRelativeTrack = useCallback((delta: number) => {
+    if (tracks.length === 0) {
+      setStatus("请先扫描并选择一首歌曲试听。");
+      return;
+    }
+
+    let nextIndex = 0;
+    if (activePreviewTrackIndex >= 0) {
+      nextIndex = (activePreviewTrackIndex + delta + tracks.length) % tracks.length;
+    } else if (delta < 0) {
+      nextIndex = tracks.length - 1;
+    }
+
+    void previewTrack(tracks[nextIndex]);
+  }, [activePreviewTrackIndex, previewTrack, tracks]);
+
+  const seekPreviewByDelta = useCallback((deltaSeconds: number) => {
+    const audioElement = audioRef.current;
+    if (!audioElement || !audioElement.src) {
+      setStatus("请先选择一首歌曲试听。");
+      return;
+    }
+
+    const duration = Number.isFinite(audioElement.duration) ? audioElement.duration : previewDuration;
+    const maxDuration = Math.max(duration || 0, 0);
+    const nextPosition = Math.min(
+      Math.max((audioElement.currentTime || 0) + deltaSeconds, 0),
+      maxDuration,
+    );
+    seekPreview(nextPosition);
+  }, [previewDuration, seekPreview]);
 
   function startPreviewScrub() {
     setIsPreviewScrubbing(true);
@@ -439,6 +476,129 @@ export default function App() {
       ),
     );
   }, []);
+
+  const applyLabelShortcut = useCallback((finalLabel: "calm" | "excited") => {
+    if (!hasPreviewTrack || activePreviewTrackIndex < 0) {
+      setStatus("请先选择一首歌曲试听。");
+      return;
+    }
+
+    const track = tracks[activePreviewTrackIndex];
+    if (!track) {
+      return;
+    }
+
+    updateFinalLabel(track.id, finalLabel);
+    setStatus(
+      autoAdvanceOnLabelChange
+        ? `已将 ${track.title} 标记为${toChineseLabel(finalLabel)}，并切换到下一首。`
+        : `已将 ${track.title} 标记为${toChineseLabel(finalLabel)}。`,
+    );
+
+    if (autoAdvanceOnLabelChange && tracks.length > 1) {
+      previewRelativeTrack(1);
+    }
+  }, [
+    activePreviewTrackIndex,
+    autoAdvanceOnLabelChange,
+    hasPreviewTrack,
+    previewRelativeTrack,
+    tracks,
+    updateFinalLabel,
+  ]);
+
+  const locateActivePreviewTrack = useCallback(() => {
+    if (!hasPreviewTrack) {
+      setStatus("请先选择一首歌曲试听。");
+      return;
+    }
+
+    const rowElement = document.getElementById(`track-row-${activePreviewTrackId}`);
+    if (!rowElement) {
+      setStatus("未找到当前试听歌曲在列表中的位置。");
+      return;
+    }
+
+    rowElement.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+  }, [activePreviewTrackId, hasPreviewTrack]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return;
+      }
+
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || target.matches("input, textarea, select"))
+      ) {
+        return;
+      }
+
+      switch (event.key) {
+        case " ":
+        case "Spacebar":
+          event.preventDefault();
+          void togglePreviewPlayback();
+          break;
+        case "ArrowLeft":
+          if (!hasPreviewTrack) {
+            return;
+          }
+          event.preventDefault();
+          seekPreviewByDelta(-5);
+          break;
+        case "ArrowRight":
+          if (!hasPreviewTrack) {
+            return;
+          }
+          event.preventDefault();
+          seekPreviewByDelta(5);
+          break;
+        case "ArrowUp":
+          event.preventDefault();
+          previewRelativeTrack(-1);
+          break;
+        case "ArrowDown":
+          event.preventDefault();
+          previewRelativeTrack(1);
+          break;
+        case "1":
+          event.preventDefault();
+          applyLabelShortcut("calm");
+          break;
+        case "2":
+          event.preventDefault();
+          applyLabelShortcut("excited");
+          break;
+        case "0":
+          event.preventDefault();
+          setAutoAdvanceOnLabelChange((current) => {
+            const nextValue = !current;
+            setStatus(`更改标签后自动下一曲已${nextValue ? "开启" : "关闭"}。`);
+            return nextValue;
+          });
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [
+    applyLabelShortcut,
+    hasPreviewTrack,
+    previewRelativeTrack,
+    seekPreviewByDelta,
+    togglePreviewPlayback,
+  ]);
 
   function scrollToTop() {
     window.scrollTo({
@@ -541,53 +701,6 @@ export default function App() {
           <div className="path-block">
             <span className="field-label">导出目录</span>
             <span>{exportFolder || "尚未选择导出目录"}</span>
-          </div>
-        </section>
-
-        <section className="panel-card audio-panel">
-          <div className="panel-header">
-            <div>
-              <span className="field-label">试听</span>
-              <h2>{previewTitle}</h2>
-            </div>
-            <button
-              className="primary-button"
-              onClick={() => void togglePreviewPlayback()}
-              disabled={!hasPreviewTrack}
-            >
-              {isPreviewPlaying ? "暂停" : "播放"}
-            </button>
-          </div>
-
-          <audio
-            ref={audioRef}
-            preload="metadata"
-            className="hidden-audio"
-            onError={() => setStatus("试听失败：当前文件无法在预览播放器中打开。")}
-          >
-            当前环境不支持音频试听。
-          </audio>
-
-          <div className="preview-timeline">
-            <span>{formatDuration(previewPosition)}</span>
-            <input
-              type="range"
-              min={0}
-              max={Math.max(previewDuration, 0.1)}
-              step={0.1}
-              value={Math.min(previewPosition, previewDuration || 0)}
-              onPointerDown={startPreviewScrub}
-              onPointerUp={finishPreviewScrub}
-              onBlur={finishPreviewScrub}
-              onInput={(event) => seekPreview(Number(event.currentTarget.value))}
-              onChange={(event) => seekPreview(Number(event.currentTarget.value))}
-              disabled={!hasPreviewTrack}
-            />
-            <span>{formatDuration(previewDuration)}</span>
-          </div>
-
-          <div className="support-hint">
-            当前试听曲目：{activePreviewTrackId ? "已选中，可拖动进度条定位" : "请在表格中选择一首歌"}
           </div>
         </section>
 
@@ -719,9 +832,14 @@ export default function App() {
 
           <div className="remote-browser">
             <div className="remote-browser-toolbar">
-              <div>
+              <div className="remote-browser-toolbar-copy">
                 <span className="field-label">当前目录</span>
-                <div className="remote-path">{remoteMusicListing?.currentPath ?? REMOTE_MUSIC_ROOT}</div>
+                <div
+                  className="remote-path"
+                  title={remoteMusicListing?.currentPath ?? REMOTE_MUSIC_ROOT}
+                >
+                  {remoteMusicListing?.currentPath ?? REMOTE_MUSIC_ROOT}
+                </div>
               </div>
               <div className="mini-button-row">
                 <button
@@ -805,6 +923,7 @@ export default function App() {
             <TrackRow
               key={track.id}
               track={track}
+              isActive={track.id === activePreviewTrackId}
               onPreview={previewTrack}
               onLabelChange={updateFinalLabel}
               onToggleExclude={toggleExcludeFromExport}
@@ -818,6 +937,63 @@ export default function App() {
           ) : null}
         </div>
       </main>
+
+      <section className={`floating-preview-bar ${hasPreviewTrack ? "active" : ""}`}>
+        <audio
+          ref={audioRef}
+          preload="metadata"
+          className="hidden-audio"
+          onError={() => setStatus("试听失败：当前文件无法在预览播放器中打开。")}
+        >
+          当前环境不支持音频试听。
+        </audio>
+
+        <div className="floating-preview-header">
+          <div className="floating-preview-copy">
+            <span className="field-label floating-preview-label">试听</span>
+            <strong className="floating-preview-title">{previewTitle}</strong>
+            <span className="support-hint floating-preview-hint">
+              {activePreviewTrackId
+                ? `空格播放/暂停，左右键快退/快进 5 秒，上下键切歌，1/2 改标签，0 自动下一曲：${autoAdvanceOnLabelChange ? "开" : "关"}`
+                : "请在表格中选择一首歌开始试听"}
+            </span>
+          </div>
+          <div className="floating-preview-actions">
+            <button
+              className="ghost-button floating-preview-locate-button"
+              onClick={locateActivePreviewTrack}
+              disabled={!hasPreviewTrack}
+            >
+              定位当前
+            </button>
+            <button
+              className="primary-button floating-preview-button"
+              onClick={() => void togglePreviewPlayback()}
+              disabled={!hasPreviewTrack}
+            >
+              {isPreviewPlaying ? "暂停" : "播放"}
+            </button>
+          </div>
+        </div>
+
+        <div className="preview-timeline floating-preview-timeline">
+          <span>{formatDuration(previewPosition)}</span>
+          <input
+            type="range"
+            min={0}
+            max={Math.max(previewDuration, 0.1)}
+            step={0.1}
+            value={Math.min(previewPosition, previewDuration || 0)}
+            onPointerDown={startPreviewScrub}
+            onPointerUp={finishPreviewScrub}
+            onBlur={finishPreviewScrub}
+            onInput={(event) => seekPreview(Number(event.currentTarget.value))}
+            onChange={(event) => seekPreview(Number(event.currentTarget.value))}
+            disabled={!hasPreviewTrack}
+          />
+          <span>{formatDuration(previewDuration)}</span>
+        </div>
+      </section>
 
       <button
         type="button"
@@ -833,6 +1009,7 @@ export default function App() {
 
 type TrackRowProps = {
   track: AnalyzedTrack;
+  isActive: boolean;
   onPreview: (track: AnalyzedTrack) => Promise<void>;
   onLabelChange: (trackId: string, finalLabel: "calm" | "excited") => void;
   onToggleExclude: (trackId: string) => void;
@@ -840,12 +1017,16 @@ type TrackRowProps = {
 
 const TrackRow = memo(function TrackRow({
   track,
+  isActive,
   onPreview,
   onLabelChange,
   onToggleExclude,
 }: TrackRowProps) {
   return (
-    <div className={`track-row ${track.excludedFromExport ? "excluded" : ""}`}>
+    <div
+      id={`track-row-${track.id}`}
+      className={`track-row ${track.excludedFromExport ? "excluded" : ""} ${isActive ? "active-preview" : ""}`}
+    >
       <div>
         <strong>{track.title}</strong>
         <span>{track.artist}</span>
