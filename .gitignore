@@ -12,5 +12,6 @@
 /release-artifacts/
 *.iml
 .idea/
+.claude/
 .DS_Store
 Thumbs.db
