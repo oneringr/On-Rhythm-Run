@@ -11,7 +11,7 @@ import { createAbortError, throwIfAborted } from "../utils/abort.js";
 
 const SAMPLE_RATE = 22_050;
 const require = createRequire(import.meta.url);
-const ffmpegPath = require("ffmpeg-static") as string | null;
+const ffmpegPath = resolveFfmpegBinaryPath(require("ffmpeg-static") as string | null);
 
 export class AudioAnalyzerWorker {
   async analyze(
@@ -124,4 +124,14 @@ async function decodeToMonoSamples(
     samples[index] = pcmBuffer.readInt16LE(index * 2) / 32768;
   }
   return samples;
+}
+
+function resolveFfmpegBinaryPath(candidatePath: string | null): string | null {
+  if (!candidatePath) {
+    return null;
+  }
+  if (candidatePath.includes("app.asar")) {
+    return candidatePath.replace("app.asar", "app.asar.unpacked");
+  }
+  return candidatePath;
 }
