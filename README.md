@@ -2,9 +2,9 @@
 
 这是一个为跑者设计的双端项目：
 
-- [watch-app](d:/code/watch-metronome-player/watch-app)：Android 8.1 手表端播放器，目标设备为 OPPO Watch 2 ECG 同类安卓手表
-- [pc-app](d:/code/watch-metronome-player/pc-app)：Windows 桌面标注与同步工具
-- [shared/schema](d:/code/watch-metronome-player/shared/schema)：`runner_manifest.json` 协议与示例
+- [watch-app](d:/code/On-Rhythm-Run/watch-app)：Android 8.1 手表端播放器，目标设备为 OPPO Watch 2 ECG 同类安卓手表
+- [pc-app](d:/code/On-Rhythm-Run/pc-app)：Windows 桌面标注与同步工具
+- [shared/schema](d:/code/On-Rhythm-Run/shared/schema)：`runner_manifest.json` 协议与示例
 
 项目目标很直接：在 PC 端扫描 MP3、分析节奏和能量、标记 `舒缓 / 激动` 标签，再把曲库同步到手表；手表根据心率或 Debug 模式自动切换播放池。
 
@@ -38,7 +38,7 @@
 ## 仓库结构
 
 ```text
-watch-metronome-player/
+On-Rhythm-Run/
   watch-app/              Android 手表应用
   pc-app/                 Electron + React 桌面工具
   shared/
@@ -111,7 +111,7 @@ Debug 模式开启后：
 
 共享 schema 位于：
 
-- [runner_manifest.schema.json](d:/code/watch-metronome-player/shared/schema/runner_manifest.schema.json)
+- [runner_manifest.schema.json](d:/code/On-Rhythm-Run/shared/schema/runner_manifest.schema.json)
 
 当前 `schemaVersion = 1`。标签字段推荐使用新结构：
 
@@ -208,7 +208,7 @@ watch.signing.storeFile=D\\:/path/to/sign-key.jks
 watch.signing.configFile=D\\:/path/to/config.txt
 ```
 
-示例文件见 [local.properties.example](d:/code/watch-metronome-player/local.properties.example)。
+示例文件见 [local.properties.example](d:/code/On-Rhythm-Run/local.properties.example)。
 
 其中：
 
