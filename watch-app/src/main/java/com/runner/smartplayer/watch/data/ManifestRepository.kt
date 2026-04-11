@@ -4,6 +4,7 @@ import com.runner.smartplayer.watch.model.LibrarySummary
 import com.runner.smartplayer.watch.model.LocalTrack
 import com.runner.smartplayer.watch.model.RunnerLibrary
 import com.runner.smartplayer.watch.model.TrackLabel
+import com.runner.smartplayer.watch.model.UNKNOWN_ARTIST
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -13,6 +14,8 @@ import java.time.Instant
 class ManifestRepository(
     private val libraryScanner: LibraryScanner,
 ) {
+    private val sha1Digest = MessageDigest.getInstance("SHA-1")
+
     fun loadLibrary(): ManifestLoadResult {
         return when (val source = libraryScanner.findLibrarySource()) {
             is LibrarySource.ManifestExportRoot -> loadManifestLibrary(source.exportRoot)
@@ -59,7 +62,7 @@ class ManifestRepository(
                     relativePath = file.name,
                     sourceFileName = file.name,
                     title = file.nameWithoutExtension,
-                    artist = "未知歌手",
+                    artist = UNKNOWN_ARTIST,
                     durationMs = 0L,
                     bpm = null,
                     energyScore = null,
@@ -101,10 +104,12 @@ class ManifestRepository(
     }
 
     private fun fallbackTrackId(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-1")
         val seed = "${file.absolutePath}|${file.length()}|${file.lastModified()}"
-        return digest.digest(seed.toByteArray())
-            .joinToString(separator = "") { byte -> "%02x".format(byte) }
+        return synchronized(sha1Digest) {
+            sha1Digest.reset()
+            sha1Digest.digest(seed.toByteArray())
+                .joinToString(separator = "") { byte -> "%02x".format(byte) }
+        }
     }
 }
 
@@ -154,7 +159,7 @@ object ManifestParser {
                 relativePath = relativePath,
                 sourceFileName = entry.optString("sourceFileName", file.name),
                 title = entry.optString("title", file.nameWithoutExtension),
-                artist = entry.optString("artist", "未知歌手"),
+                artist = entry.optString("artist", UNKNOWN_ARTIST),
                 durationMs = entry.optLong("durationMs"),
                 bpm = entry.optDouble("bpm").takeUnless { it.isNaN() },
                 energyScore = entry.optDouble("energyScore").takeUnless { it.isNaN() },

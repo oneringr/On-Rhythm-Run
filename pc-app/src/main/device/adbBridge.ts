@@ -8,6 +8,7 @@ import type {
   AdbExportLibraryResult,
   AdbPushResult,
   AnalyzedTrack,
+  PushProgressUpdate,
   RemoteMusicEntry,
   RemoteMusicListing,
 } from "../../common/manifest.js";
@@ -30,6 +31,7 @@ export class AdbBridge {
     deviceId: string;
     libraryName: string;
     tracks: AnalyzedTrack[];
+    onProgress?: (progress: PushProgressUpdate) => void;
   }): Promise<AdbPushResult> {
     const tracksToPush = params.tracks.filter((track) => !track.excludedFromExport);
     if (tracksToPush.length === 0) {
@@ -52,13 +54,41 @@ export class AdbBridge {
     const stagedFiles = await stageTracksForPush(stagingRoot, tracksToPush);
 
     try {
-      for (const stagedFile of stagedFiles) {
+      params.onProgress?.({
+        target: "tracks",
+        phase: "preparing",
+        processed: 0,
+        total: stagedFiles.length,
+        percent: 0,
+        message: `正在准备推送 ${stagedFiles.length} 首歌曲...`,
+      });
+
+      for (const [index, stagedFile] of stagedFiles.entries()) {
+        const processed = index + 1;
         const remoteFilePath = path.posix.join(remoteDirectory, path.basename(stagedFile));
         await runAdb(["-s", params.deviceId, "push", stagedFile, remoteFilePath]);
+        params.onProgress?.({
+          target: "tracks",
+          phase: "pushing",
+          processed,
+          total: stagedFiles.length,
+          percent: Math.round((processed / stagedFiles.length) * 100),
+          message: `正在推送歌曲 ${processed}/${stagedFiles.length}`,
+          currentFileName: path.basename(stagedFile),
+        });
       }
     } finally {
       await fs.rm(stagingRoot, { recursive: true, force: true });
     }
+
+    params.onProgress?.({
+      target: "tracks",
+      phase: "done",
+      processed: stagedFiles.length,
+      total: stagedFiles.length,
+      percent: 100,
+      message: `歌曲推送完成，共 ${stagedFiles.length} 首。`,
+    });
 
     return {
       deviceId: params.deviceId,
@@ -71,6 +101,7 @@ export class AdbBridge {
     deviceId: string;
     libraryName: string;
     tracks: AnalyzedTrack[];
+    onProgress?: (progress: PushProgressUpdate) => void;
   }): Promise<AdbExportLibraryResult> {
     const tracksToPush = params.tracks.filter((track) => !track.excludedFromExport);
     if (tracksToPush.length === 0) {
@@ -80,6 +111,15 @@ export class AdbBridge {
     const stagingRoot = await fs.mkdtemp(path.join(os.tmpdir(), "runner-adb-export-"));
 
     try {
+      params.onProgress?.({
+        target: "runner-export",
+        phase: "preparing",
+        processed: 0,
+        total: tracksToPush.length + 1,
+        percent: 0,
+        message: `正在准备完整曲库，共 ${tracksToPush.length} 首歌曲...`,
+      });
+
       const exportResult = await new ExportBuilder().exportLibrary({
         libraryName: params.libraryName,
         outputDirectory: stagingRoot,
@@ -101,8 +141,17 @@ export class AdbBridge {
 
       const remoteManifestPath = path.posix.join(REMOTE_RUNNER_EXPORT_ROOT, "runner_manifest.json");
       await runAdb(["-s", params.deviceId, "push", exportResult.manifestPath, remoteManifestPath]);
+      params.onProgress?.({
+        target: "runner-export",
+        phase: "pushing",
+        processed: 1,
+        total: tracksToPush.length + 1,
+        percent: Math.round((1 / (tracksToPush.length + 1)) * 100),
+        message: `正在推送完整曲库 1/${tracksToPush.length + 1}`,
+        currentFileName: path.basename(remoteManifestPath),
+      });
 
-      for (const track of tracksToPush) {
+      for (const [index, track] of tracksToPush.entries()) {
         const relativeTrackPath = makeRelativeTrackPath(track.sourceFileName);
         const localTrackPath = path.join(exportResult.outputRoot, relativeTrackPath);
         const remoteTrackPath = path.posix.join(
@@ -110,6 +159,16 @@ export class AdbBridge {
           relativeTrackPath.replace(/\\/g, "/"),
         );
         await runAdb(["-s", params.deviceId, "push", localTrackPath, remoteTrackPath]);
+        const processed = index + 2;
+        params.onProgress?.({
+          target: "runner-export",
+          phase: "pushing",
+          processed,
+          total: tracksToPush.length + 1,
+          percent: Math.round((processed / (tracksToPush.length + 1)) * 100),
+          message: `正在推送完整曲库 ${processed}/${tracksToPush.length + 1}`,
+          currentFileName: track.sourceFileName,
+        });
       }
 
       await runAdb([
@@ -118,6 +177,15 @@ export class AdbBridge {
         "shell",
         `rm -rf ${quoteForShell(LEGACY_WATCH_APP_EXPORT_ROOT)}`,
       ]);
+
+      params.onProgress?.({
+        target: "runner-export",
+        phase: "done",
+        processed: tracksToPush.length + 1,
+        total: tracksToPush.length + 1,
+        percent: 100,
+        message: `完整曲库推送完成，共 ${tracksToPush.length} 首歌曲。`,
+      });
 
       return {
         deviceId: params.deviceId,
@@ -131,23 +199,23 @@ export class AdbBridge {
   }
 
   async listRemoteEntries(deviceId: string, remotePath: string = DEFAULT_REMOTE_MUSIC_ROOT): Promise<RemoteMusicListing> {
-    ensureMusicPath(remotePath);
+    const safeRemotePath = ensureMusicPath(remotePath);
 
-    await runAdb(["-s", deviceId, "shell", `mkdir -p ${quoteForShell(remotePath)}`]);
+    await runAdb(["-s", deviceId, "shell", `mkdir -p ${quoteForShell(safeRemotePath)}`]);
     const [result, recursiveMp3Count] = await Promise.all([
       runAdb([
         "-s",
         deviceId,
         "shell",
-        `ls -a -1 -p ${quoteForShell(remotePath)}`,
+        `ls -a -1 -p ${quoteForShell(safeRemotePath)}`,
       ]),
-      countRemoteMp3Files(deviceId, remotePath),
+      countRemoteMp3Files(deviceId, safeRemotePath),
     ]);
-    const entries = parseRemoteEntries(result.stdout, remotePath);
+    const entries = parseRemoteEntries(result.stdout, safeRemotePath);
 
     return {
-      currentPath: remotePath,
-      parentPath: remotePath === DEFAULT_REMOTE_MUSIC_ROOT ? null : path.posix.dirname(remotePath),
+      currentPath: safeRemotePath,
+      parentPath: safeRemotePath === DEFAULT_REMOTE_MUSIC_ROOT ? null : path.posix.dirname(safeRemotePath),
       entries,
       stats: {
         directoryCount: entries.filter((entry) => entry.isDirectory).length,
@@ -159,8 +227,8 @@ export class AdbBridge {
   }
 
   async deleteRemoteEntry(deviceId: string, remotePath: string): Promise<void> {
-    ensureMusicPath(remotePath);
-    await runAdb(["-s", deviceId, "shell", `rm -rf ${quoteForShell(remotePath)}`]);
+    const safeRemotePath = ensureMusicPath(remotePath);
+    await runAdb(["-s", deviceId, "shell", `rm -rf ${quoteForShell(safeRemotePath)}`]);
   }
 }
 
@@ -266,10 +334,15 @@ function quoteForShell(input: string): string {
   return `'${input.replace(/'/g, `'\\''`)}'`;
 }
 
-function ensureMusicPath(remotePath: string): void {
-  if (!remotePath.startsWith(DEFAULT_REMOTE_MUSIC_ROOT)) {
+export function ensureMusicPath(remotePath: string): string {
+  const normalizedPath = path.posix.normalize(remotePath);
+  if (
+    normalizedPath !== DEFAULT_REMOTE_MUSIC_ROOT &&
+    !normalizedPath.startsWith(`${DEFAULT_REMOTE_MUSIC_ROOT}/`)
+  ) {
     throw new Error("仅允许管理 /sdcard/Music 目录中的文件。");
   }
+  return normalizedPath;
 }
 
 async function countRemoteMp3Files(deviceId: string, remotePath: string): Promise<number> {

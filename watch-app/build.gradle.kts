@@ -1,7 +1,74 @@
+import java.io.File
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
+fun firstNonBlank(vararg values: String?): String? = values.firstOrNull { !it.isNullOrBlank() }
+
+fun resolveLocalFile(path: String?): File? {
+    if (path.isNullOrBlank()) {
+        return null
+    }
+    val file = File(path)
+    return if (file.isAbsolute) file else rootProject.file(path)
+}
+
+val rootLocalProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.reader(Charsets.UTF_8).use(::load)
+    }
+}
+
+val externalSigningProperties = Properties().apply {
+    val signingConfigFilePath = firstNonBlank(
+        providers.gradleProperty("watch.signing.configFile").orNull,
+        System.getenv("WATCH_SIGNING_CONFIG_FILE"),
+        rootLocalProperties.getProperty("watch.signing.configFile")
+    )
+    if (!signingConfigFilePath.isNullOrBlank()) {
+        val signingConfigFile = resolveLocalFile(signingConfigFilePath)
+        if (signingConfigFile?.exists() == true) {
+            signingConfigFile.reader(Charsets.UTF_8).use(::load)
+        }
+    }
+}
+
+val releaseSigningStoreFile = firstNonBlank(
+    providers.gradleProperty("watch.signing.storeFile").orNull,
+    System.getenv("WATCH_SIGNING_STORE_FILE"),
+    rootLocalProperties.getProperty("watch.signing.storeFile"),
+    externalSigningProperties.getProperty("storeFile")
+)?.let(::resolveLocalFile)
+
+val releaseSigningStorePassword = firstNonBlank(
+    providers.gradleProperty("watch.signing.storePassword").orNull,
+    System.getenv("WATCH_SIGNING_STORE_PASSWORD"),
+    rootLocalProperties.getProperty("watch.signing.storePassword"),
+    externalSigningProperties.getProperty("storePassword")
+)
+
+val releaseSigningKeyAlias = firstNonBlank(
+    providers.gradleProperty("watch.signing.keyAlias").orNull,
+    System.getenv("WATCH_SIGNING_KEY_ALIAS"),
+    rootLocalProperties.getProperty("watch.signing.keyAlias"),
+    externalSigningProperties.getProperty("keyAlias")
+)
+
+val releaseSigningKeyPassword = firstNonBlank(
+    providers.gradleProperty("watch.signing.keyPassword").orNull,
+    System.getenv("WATCH_SIGNING_KEY_PASSWORD"),
+    rootLocalProperties.getProperty("watch.signing.keyPassword"),
+    externalSigningProperties.getProperty("keyPassword")
+)
+
+val hasReleaseSigningConfig = releaseSigningStoreFile?.exists() == true &&
+    !releaseSigningStorePassword.isNullOrBlank() &&
+    !releaseSigningKeyAlias.isNullOrBlank() &&
+    !releaseSigningKeyPassword.isNullOrBlank()
 
 android {
     namespace = "com.runner.smartplayer.watch"
@@ -18,8 +85,22 @@ android {
         vectorDrawables.useSupportLibrary = true
     }
 
+    signingConfigs {
+        if (hasReleaseSigningConfig) {
+            create("release") {
+                storeFile = releaseSigningStoreFile
+                storePassword = releaseSigningStorePassword
+                keyAlias = releaseSigningKeyAlias
+                keyPassword = releaseSigningKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasReleaseSigningConfig) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -38,7 +119,7 @@ android {
     }
 
     buildFeatures {
-        viewBinding = true
+        viewBinding = false
     }
 
     testOptions {

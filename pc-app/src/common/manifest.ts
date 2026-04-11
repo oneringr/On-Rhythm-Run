@@ -61,6 +61,16 @@ export interface ScanProgressUpdate {
   message: string;
 }
 
+export interface PushProgressUpdate {
+  target: "tracks" | "runner-export";
+  phase: "preparing" | "pushing" | "done";
+  processed: number;
+  total: number;
+  percent: number;
+  message: string;
+  currentFileName?: string;
+}
+
 export interface ExportResult {
   outputRoot: string;
   manifestPath: string;
@@ -107,6 +117,6 @@ export interface AdbExportLibraryResult {
 }
 
 export function makeRelativeTrackPath(sourceFileName: string): string {
-  const sanitizedFileName = sourceFileName.replace(/[\\/]/g, "_");
+  const sanitizedFileName = sourceFileName.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_");
   return `tracks/${sanitizedFileName}`;
 }

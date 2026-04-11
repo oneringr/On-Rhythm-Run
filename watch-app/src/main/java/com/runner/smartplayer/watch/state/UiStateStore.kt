@@ -40,8 +40,16 @@ class UiStateStore {
         updatePlayback { it.copy(isAdaptiveEnabled = enabled) }
     }
 
+    fun setDebugModeEnabled(enabled: Boolean) {
+        updatePlayback { it.copy(isDebugModeEnabled = enabled) }
+    }
+
     fun setPlaybackMode(mode: PlaybackMode) {
-        updatePlayback { it.copy(playbackMode = mode) }
-        updateHeartRate { it.copy(mode = mode) }
+        mutableState.update { current ->
+            current.copy(
+                playback = current.playback.copy(playbackMode = mode),
+                heartRate = current.heartRate.copy(mode = mode),
+            )
+        }
     }
 }

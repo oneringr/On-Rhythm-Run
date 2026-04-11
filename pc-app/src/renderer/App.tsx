@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AdbDevice,
   AnalyzedTrack,
+  PushProgressUpdate,
   RemoteMusicEntry,
   RemoteMusicListing,
   ScanProgressUpdate,
@@ -27,6 +28,7 @@ export default function App() {
   const [isPushingRunnerExport, setIsPushingRunnerExport] = useState(false);
   const [isLoadingRemoteMusic, setIsLoadingRemoteMusic] = useState(false);
   const [remoteMusicListing, setRemoteMusicListing] = useState<RemoteMusicListing | null>(null);
+  const [pushProgress, setPushProgress] = useState<PushProgressUpdate | null>(null);
 
   const [previewTitle, setPreviewTitle] = useState("尚未选择试听歌曲");
   const [previewDuration, setPreviewDuration] = useState(0);
@@ -70,6 +72,18 @@ export default function App() {
       if (progress.phase !== "done") {
         setStatus(progress.message);
       }
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = window.runnerApp.onPushProgress((progress) => {
+      setPushProgress(progress);
+      setDeviceStatus(
+        progress.currentFileName
+          ? `${progress.message}：${progress.currentFileName}`
+          : progress.message,
+      );
     });
     return unsubscribe;
   }, []);
@@ -191,7 +205,7 @@ export default function App() {
       const result = await window.runnerApp.exportLibrary({
         libraryName,
         outputDirectory: exportFolder,
-        tracks,
+        tracks: exportableTracks,
       });
       setStatus(`已导出 ${result.trackCount} 首歌曲到 ${result.outputRoot}`);
     } catch (error) {
@@ -233,12 +247,20 @@ export default function App() {
     }
 
     setIsPushingToDevice(true);
+    setPushProgress({
+      target: "tracks",
+      phase: "preparing",
+      processed: 0,
+      total: exportableTracks.length,
+      percent: 0,
+      message: "正在准备歌曲推送...",
+    });
     setDeviceStatus("正在通过 ADB 推送歌曲到手表...");
     try {
       const result = await window.runnerApp.pushTracksToDevice({
         deviceId: selectedDeviceId,
         libraryName,
-        tracks,
+        tracks: exportableTracks,
       });
       setDeviceStatus(`已推送 ${result.pushedCount} 首歌曲到 ${result.remotePath}`);
       await loadRemoteMusic(selectedDeviceId, result.remotePath);
@@ -260,12 +282,20 @@ export default function App() {
     }
 
     setIsPushingRunnerExport(true);
+    setPushProgress({
+      target: "runner-export",
+      phase: "preparing",
+      processed: 0,
+      total: exportableTracks.length + 1,
+      percent: 0,
+      message: "正在准备完整曲库推送...",
+    });
     setDeviceStatus("正在通过 ADB 推送完整曲库到 /sdcard/Music/RunnerPlayerExport ...");
     try {
       const result = await window.runnerApp.pushRunnerExportToDevice({
         deviceId: selectedDeviceId,
         libraryName,
-        tracks,
+        tracks: exportableTracks,
       });
       setDeviceStatus(
         `已推送 ${result.trackCount} 首歌曲和 manifest 到 ${result.remotePath}`,
@@ -314,37 +344,41 @@ export default function App() {
     }
   }
 
-  async function previewTrack(track: AnalyzedTrack) {
-    const url = await window.runnerApp.toPreviewUrl(track.sourcePath);
-    const title = `${track.title} - ${track.artist}`;
-    setPreviewTitle(title);
-    setActivePreviewTrackId(track.id);
-
-    const audioElement = audioRef.current;
-    if (!audioElement) {
-      return;
-    }
-
-    audioElement.pause();
-    if (audioElement.src !== url) {
-      audioElement.src = url;
-    }
-    setPreviewDuration(0);
-    setIsPreviewScrubbing(false);
-    audioElement.currentTime = 0;
-    setPreviewPosition(0);
-
+  const previewTrack = useCallback(async (track: AnalyzedTrack) => {
     try {
-      await audioElement.play();
-      setStatus(`正在试听：${title}`);
+      const url = await window.runnerApp.toPreviewUrl(track.sourcePath);
+      const title = `${track.title} - ${track.artist}`;
+      setPreviewTitle(title);
+      setActivePreviewTrackId(track.id);
+
+      const audioElement = audioRef.current;
+      if (!audioElement) {
+        return;
+      }
+
+      audioElement.pause();
+      if (audioElement.src !== url) {
+        audioElement.src = url;
+      }
+      setPreviewDuration(0);
+      setIsPreviewScrubbing(false);
+      audioElement.currentTime = 0;
+      setPreviewPosition(0);
+
+      try {
+        await audioElement.play();
+        setStatus(`正在试听：${title}`);
+      } catch (error) {
+        setStatus(
+          error instanceof Error
+            ? `试听播放失败：${error.message}`
+            : "已加载试听歌曲，请点击下方播放器继续播放。",
+        );
+      }
     } catch (error) {
-      setStatus(
-        error instanceof Error
-          ? `试听播放失败：${error.message}`
-          : "已加载试听歌曲，请点击下方播放器继续播放。",
-      );
+      setStatus(toErrorMessage(error, "试听加载失败。"));
     }
-  }
+  }, []);
 
   async function togglePreviewPlayback() {
     const audioElement = audioRef.current;
@@ -380,7 +414,7 @@ export default function App() {
     setIsPreviewScrubbing(false);
   }
 
-  function updateFinalLabel(trackId: string, finalLabel: "calm" | "excited") {
+  const updateFinalLabel = useCallback((trackId: string, finalLabel: "calm" | "excited") => {
     setTracks((current) =>
       current.map((track) =>
         track.id === trackId
@@ -391,9 +425,9 @@ export default function App() {
           : track,
       ),
     );
-  }
+  }, []);
 
-  function toggleExcludeFromExport(trackId: string) {
+  const toggleExcludeFromExport = useCallback((trackId: string) => {
     setTracks((current) =>
       current.map((track) =>
         track.id === trackId
@@ -404,7 +438,7 @@ export default function App() {
           : track,
       ),
     );
-  }
+  }, []);
 
   function scrollToTop() {
     window.scrollTo({
@@ -638,6 +672,28 @@ export default function App() {
             </span>
           </div>
 
+          {pushProgress ? (
+            <div className={`scan-progress ${(isPushingToDevice || isPushingRunnerExport) ? "active" : ""}`}>
+              <div className="scan-progress-header">
+                <span>
+                  {pushProgress.target === "runner-export" ? "完整曲库推送" : "歌曲推送"}
+                </span>
+                <strong>{Math.min(pushProgress.percent, 100)}%</strong>
+              </div>
+              <div className="scan-progress-track" aria-hidden="true">
+                <div
+                  className="scan-progress-fill"
+                  style={{ width: `${Math.min(pushProgress.percent, 100)}%` }}
+                />
+              </div>
+              <div className="support-hint">
+                {pushProgress.currentFileName
+                  ? `${pushProgress.processed}/${pushProgress.total} · ${pushProgress.currentFileName}`
+                  : `${pushProgress.processed}/${pushProgress.total}`}
+              </div>
+            </div>
+          ) : null}
+
           <div className="summary-grid remote-stats-grid">
             <SummaryCard
               label="文件夹"
@@ -746,40 +802,13 @@ export default function App() {
           </div>
 
           {tracks.map((track) => (
-            <div
-              className={`track-row ${track.excludedFromExport ? "excluded" : ""}`}
+            <TrackRow
               key={track.id}
-            >
-              <div>
-                <strong>{track.title}</strong>
-                <span>{track.artist}</span>
-                {track.excludedFromExport ? <span className="track-flag">已排除导出</span> : null}
-              </div>
-              <span>{Math.round(track.bpm)}</span>
-              <span>{track.rms.toFixed(3)}</span>
-              <span>{Math.round(track.spectralCentroid)}</span>
-              <span className={`label-pill ${track.suggestedLabel}`}>{toChineseLabel(track.suggestedLabel)}</span>
-              <select
-                className="label-select"
-                value={track.finalLabel}
-                onChange={(event) =>
-                  updateFinalLabel(track.id, event.target.value as "calm" | "excited")
-                }
-                disabled={track.excludedFromExport}
-              >
-                <option value="calm">舒缓</option>
-                <option value="excited">激动</option>
-              </select>
-              <button className="preview-button" onClick={() => void previewTrack(track)}>
-                试听
-              </button>
-              <button
-                className={track.excludedFromExport ? "ghost-button" : "danger-button"}
-                onClick={() => toggleExcludeFromExport(track.id)}
-              >
-                {track.excludedFromExport ? "恢复" : "删除"}
-              </button>
-            </div>
+              track={track}
+              onPreview={previewTrack}
+              onLabelChange={updateFinalLabel}
+              onToggleExclude={toggleExcludeFromExport}
+            />
           ))}
 
           {tracks.length === 0 ? (
@@ -801,6 +830,52 @@ export default function App() {
     </div>
   );
 }
+
+type TrackRowProps = {
+  track: AnalyzedTrack;
+  onPreview: (track: AnalyzedTrack) => Promise<void>;
+  onLabelChange: (trackId: string, finalLabel: "calm" | "excited") => void;
+  onToggleExclude: (trackId: string) => void;
+};
+
+const TrackRow = memo(function TrackRow({
+  track,
+  onPreview,
+  onLabelChange,
+  onToggleExclude,
+}: TrackRowProps) {
+  return (
+    <div className={`track-row ${track.excludedFromExport ? "excluded" : ""}`}>
+      <div>
+        <strong>{track.title}</strong>
+        <span>{track.artist}</span>
+        {track.excludedFromExport ? <span className="track-flag">已排除导出</span> : null}
+      </div>
+      <span>{Math.round(track.bpm)}</span>
+      <span>{track.rms.toFixed(3)}</span>
+      <span>{Math.round(track.spectralCentroid)}</span>
+      <span className={`label-pill ${track.suggestedLabel}`}>{toChineseLabel(track.suggestedLabel)}</span>
+      <select
+        className="label-select"
+        value={track.finalLabel}
+        onChange={(event) => onLabelChange(track.id, event.target.value as "calm" | "excited")}
+        disabled={track.excludedFromExport}
+      >
+        <option value="calm">舒缓</option>
+        <option value="excited">激动</option>
+      </select>
+      <button className="preview-button" onClick={() => void onPreview(track)}>
+        试听
+      </button>
+      <button
+        className={track.excludedFromExport ? "ghost-button" : "danger-button"}
+        onClick={() => onToggleExclude(track.id)}
+      >
+        {track.excludedFromExport ? "恢复" : "删除"}
+      </button>
+    </div>
+  );
+});
 
 function buildScanStatus(trackCount: number, otherAudioExtensions: string[]): string {
   if (trackCount > 0) {

@@ -5,9 +5,11 @@
 /pc-app/dist/
 /pc-app/dist-electron/
 /pc-app/out/
+/pc-app/release/
 /pc-app/node_modules/
 /pc-app/.vite/
 /pc-app/coverage/
+/release-artifacts/
 *.iml
 .idea/
 .DS_Store

@@ -2,11 +2,14 @@
   "name": "runner-smart-player-pc",
   "version": "1.0.0",
   "private": true,
+  "description": "On Rhythm Run Windows desktop companion for music tagging, preview, export, and ADB sync.",
+  "author": "OneRingR",
   "type": "module",
   "main": "dist-electron/main/main.cjs",
   "scripts": {
     "dev": "concurrently -k \"vite\" \"tsc -p tsconfig.node.json --watch --preserveWatchOutput\" \"wait-on http-get://127.0.0.1:5173 file:dist-electron/main/main.cjs file:dist-electron/main/preload.cjs && node scripts/start-electron-dev.cjs\"",
     "build": "vite build && tsc -p tsconfig.node.json",
+    "release:win": "npm run build && electron-builder --win portable zip",
     "test": "vitest run"
   },
   "dependencies": {
@@ -22,9 +25,44 @@
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
     "typescript": "^5.7.2",
     "vite": "^6.0.3",
     "vitest": "^2.1.8",
     "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.oneringr.onrhythmrun.pc",
+    "productName": "On Rhythm Run",
+    "directories": {
+      "output": "release"
+    },
+    "asar": true,
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "dist-electron/main/main.cjs"
+    },
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "OnRhythmRun-PC-${version}-${arch}.${ext}"
+    }
   }
 }

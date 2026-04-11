@@ -3,14 +3,18 @@ package com.runner.smartplayer.watch.data
 import com.runner.smartplayer.watch.model.TrackLabel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
 import java.io.File
-import java.nio.file.Files
+import org.junit.rules.TemporaryFolder
 
 class ManifestParserTest {
+    @get:Rule
+    val tempFolder = TemporaryFolder()
+
     @Test
     fun parsesValidManifestAndSkipsMissingFiles() {
-        val tempRoot = Files.createTempDirectory("runner-manifest-test").toFile()
+        val tempRoot = tempFolder.newFolder("runner-manifest-test")
         val tracksDir = File(tempRoot, "tracks").apply { mkdirs() }
         File(tracksDir, "present.mp3").writeText("stub")
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseAdbDevices, parseRemoteEntries } from "./adbBridge.js";
+import { ensureMusicPath, parseAdbDevices, parseRemoteEntries } from "./adbBridge.js";
 
 describe("adbBridge parsers", () => {
   it("parses adb devices -l output", () => {
@@ -50,5 +50,12 @@ describe("adbBridge parsers", () => {
         isDirectory: false,
       },
     ]);
+  });
+
+  it("normalizes managed remote paths and blocks traversal", () => {
+    expect(ensureMusicPath("/sdcard/Music/RunnerPlayerExport/../test")).toBe("/sdcard/Music/test");
+    expect(() => ensureMusicPath("/sdcard/Music/../../data/data/com.test")).toThrow(
+      "仅允许管理 /sdcard/Music 目录中的文件。",
+    );
   });
 });

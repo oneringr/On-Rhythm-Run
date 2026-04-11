@@ -52,6 +52,10 @@ class HeartRateSensorController(
         publishSnapshot(null, SensorAvailability.STOPPED)
     }
 
+    fun resetClassifier(mode: PlaybackMode = PlaybackMode.CALM) {
+        classifier.reset(mode)
+    }
+
     override fun onSensorChanged(event: SensorEvent?) {
         val bpm = event?.values?.firstOrNull()?.roundToInt()
         val availability = when (sensorAccuracy) {

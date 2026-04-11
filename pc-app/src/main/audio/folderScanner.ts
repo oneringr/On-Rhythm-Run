@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { parseFile } from "music-metadata";
 import type { RawScannedTrack, ScanProgressUpdate } from "../../common/manifest.js";
+import { throwIfAborted } from "../utils/abort.js";
 
 const AUDIO_FILE_EXTENSIONS = new Set([
   ".aac",
@@ -27,12 +28,15 @@ export class FolderScanner {
   async scan(
     sourceFolder: string,
     onProgress?: (progress: ScanProgressUpdate) => void,
+    signal?: AbortSignal,
   ): Promise<FolderScanDetails> {
+    throwIfAborted(signal);
     const collected = await collectAudioFiles(sourceFolder);
     const tracks: RawScannedTrack[] = [];
     const totalTracks = collected.mp3Files.length;
 
     for (const [index, filePath] of collected.mp3Files.entries()) {
+      throwIfAborted(signal);
       const stats = await fs.stat(filePath);
       const metadata = await parseFile(filePath, { duration: true });
       const relativeSource = path.relative(sourceFolder, filePath);

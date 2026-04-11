@@ -6,11 +6,12 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
-import android.util.Log
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.net.toUri
@@ -18,21 +19,29 @@ import androidx.media.app.NotificationCompat as MediaNotificationCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.runner.smartplayer.watch.R
 import com.runner.smartplayer.watch.data.ManifestLoadResult
 import com.runner.smartplayer.watch.model.LocalTrack
 import com.runner.smartplayer.watch.model.PlaybackMode
+import com.runner.smartplayer.watch.model.QueueMode
+import com.runner.smartplayer.watch.model.SensorAvailability
+import com.runner.smartplayer.watch.model.TrackLabel
+import com.runner.smartplayer.watch.model.displayTitle
 import com.runner.smartplayer.watch.sensor.HeartRateSensorController
 import com.runner.smartplayer.watch.state.AppGraph
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 class AdaptivePlaybackService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -42,14 +51,23 @@ class AdaptivePlaybackService : Service() {
     private lateinit var notificationManager: NotificationManagerCompat
     private lateinit var queueEngine: AdaptiveQueueEngine
     private lateinit var heartRateSensorController: HeartRateSensorController
+    private lateinit var audioManager: AudioManager
 
     private var currentTrack: LocalTrack? = null
     private var adaptiveEnabled: Boolean = true
+    private var debugModeEnabled: Boolean = false
     private var currentMode: PlaybackMode = PlaybackMode.CALM
+    private var queueMode: QueueMode = QueueMode.SHUFFLE
+    private var fadeJob: Job? = null
+    private var loadJob: Job? = null
+    private var cachedPlaylist: List<LocalTrack> = emptyList()
+    private var cachedVolumePercent: Int = 50
 
     override fun onCreate() {
         super.onCreate()
         notificationManager = NotificationManagerCompat.from(this)
+        audioManager = getSystemService(AudioManager::class.java)
+        cachedVolumePercent = currentVolumePercent()
         createNotificationChannel()
 
         queueEngine = AdaptiveQueueEngine()
@@ -70,7 +88,9 @@ class AdaptivePlaybackService : Service() {
         heartRateSensorController = HeartRateSensorController(
             context = this,
             onHeartRateSnapshot = { snapshot ->
-                AppGraph.uiStateStore.updateHeartRate { snapshot }
+                if (!debugModeEnabled) {
+                    AppGraph.uiStateStore.updateHeartRate { snapshot }
+                }
             },
             onStableModeChanged = ::onStableModeChanged,
         )
@@ -78,6 +98,7 @@ class AdaptivePlaybackService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification())
         loadLibrary()
         heartRateSensorController.start()
+        startPlaybackTicker()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -94,9 +115,46 @@ class AdaptivePlaybackService : Service() {
                     adaptiveEnabled,
                 )
                 AppGraph.uiStateStore.setAdaptiveEnabled(adaptiveEnabled)
-                AppGraph.uiStateStore.setMessage(
-                    if (adaptiveEnabled) "已开启自适应模式" else "已关闭自适应模式"
+                refreshPlaylistCache()
+                updatePlaybackSnapshot(
+                    getString(
+                        if (adaptiveEnabled) {
+                            R.string.message_adaptive_enabled
+                        } else {
+                            R.string.message_adaptive_disabled
+                        }
+                    )
                 )
+            }
+            ServiceIntents.ACTION_TOGGLE_DEBUG_MODE -> {
+                setDebugModeEnabled(
+                    intent.getBooleanExtra(ServiceIntents.EXTRA_DEBUG_ENABLED, !debugModeEnabled)
+                )
+            }
+            ServiceIntents.ACTION_TOGGLE_DEBUG_PLAYBACK_MODE -> {
+                toggleDebugPlaybackMode()
+            }
+            ServiceIntents.ACTION_VOLUME_UP -> {
+                audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, 0)
+                cachedVolumePercent = currentVolumePercent()
+                updatePlaybackSnapshot(getString(R.string.message_volume_percent, cachedVolumePercent))
+            }
+            ServiceIntents.ACTION_VOLUME_DOWN -> {
+                audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, 0)
+                cachedVolumePercent = currentVolumePercent()
+                updatePlaybackSnapshot(getString(R.string.message_volume_percent, cachedVolumePercent))
+            }
+            ServiceIntents.ACTION_CYCLE_QUEUE_MODE -> {
+                queueMode = queueMode.next()
+                if (queueMode == QueueMode.SHUFFLE) {
+                    queueEngine.reshuffleAll(currentTrack)
+                }
+                refreshPlaylistCache()
+                updatePlaybackSnapshot(getString(R.string.message_queue_mode, queueMode.label()))
+            }
+            ServiceIntents.ACTION_PLAY_TRACK_BY_ID -> {
+                val trackId = intent.getStringExtra(ServiceIntents.EXTRA_TRACK_ID)
+                playTrackById(trackId)
             }
         }
         updateNotification()
@@ -107,6 +165,8 @@ class AdaptivePlaybackService : Service() {
 
     override fun onDestroy() {
         heartRateSensorController.stop()
+        fadeJob?.cancel()
+        loadJob?.cancel()
         player.removeListener(playbackListener)
         player.release()
         mediaSession.release()
@@ -115,89 +175,221 @@ class AdaptivePlaybackService : Service() {
     }
 
     private fun loadLibrary() {
-        when (val result = AppGraph.manifestRepository.loadLibrary()) {
-            is ManifestLoadResult.Error -> {
-                Log.w(TAG, "loadLibrary failed: ${result.message}")
-                AppGraph.uiStateStore.setMessage(result.message)
-            }
-
-            is ManifestLoadResult.Success -> {
-                Log.d(
-                    TAG,
-                    "Loaded library ${result.library.libraryName} with ${result.library.tracks.size} tracks",
-                )
-                queueEngine.load(result.library.tracks)
-                AppGraph.uiStateStore.updateLibrary(result.summary)
-                AppGraph.uiStateStore.setMessage(result.statusMessage)
-                if (currentTrack != null && result.library.tracks.none { it.id == currentTrack?.id }) {
-                    currentTrack = null
-                    player.stop()
-                    player.clearMediaItems()
-                }
-                if (currentTrack == null) {
-                    val firstTrack = queueEngine.nextCombined(current = null)
-                    prepareTrack(firstTrack, playImmediately = false, reason = "曲库已就绪")
+        loadJob?.cancel()
+        loadJob = serviceScope.launch(Dispatchers.IO) {
+            val result = AppGraph.manifestRepository.loadLibrary()
+            withContext(Dispatchers.Main.immediate) {
+                when (result) {
+                    is ManifestLoadResult.Error -> {
+                        Log.w(TAG, "loadLibrary failed: ${result.message}")
+                        updatePlaybackSnapshot(result.message)
+                        updateNotification()
+                    }
+                    is ManifestLoadResult.Success -> {
+                        Log.d(
+                            TAG,
+                            "Loaded library ${result.library.libraryName} with ${result.library.tracks.size} tracks",
+                        )
+                        queueEngine.load(result.library.tracks)
+                        AppGraph.uiStateStore.updateLibrary(result.summary)
+                        if (currentTrack != null && result.library.tracks.none { it.id == currentTrack?.id }) {
+                            currentTrack = null
+                            player.stop()
+                            player.clearMediaItems()
+                        }
+                        if (currentTrack == null) {
+                            val firstTrack = nextTrackForCurrentContext(autoAdvance = false)
+                            prepareTrack(
+                                firstTrack,
+                                playImmediately = false,
+                                reason = getString(R.string.message_library_ready),
+                            )
+                        } else {
+                            refreshPlaylistCache()
+                            updatePlaybackSnapshot(result.statusMessage)
+                            updateNotification()
+                        }
+                    }
                 }
             }
         }
-        updateNotification()
     }
 
     private fun togglePlayback() {
         if (currentTrack == null) {
-            val seedTrack = nextTrackForCurrentContext()
-            prepareTrack(seedTrack, playImmediately = true, reason = "开始播放")
+            val seedTrack = nextTrackForCurrentContext(autoAdvance = false)
+            prepareTrack(seedTrack, playImmediately = true, reason = getString(R.string.message_start_playback))
             return
         }
 
         if (player.isPlaying) {
             player.pause()
-            AppGraph.uiStateStore.setMessage("已暂停")
+            updatePlaybackSnapshot(getString(R.string.message_paused))
         } else {
             if (player.playbackState == Player.STATE_IDLE) {
                 currentTrack?.let { track ->
-                    prepareTrack(track, playImmediately = true, reason = "开始播放")
+                    prepareTrack(
+                        track,
+                        playImmediately = true,
+                        reason = getString(R.string.message_start_playback),
+                    )
                     return
                 }
             }
             player.play()
-            AppGraph.uiStateStore.setMessage("正在播放")
+            updatePlaybackSnapshot(getString(R.string.message_playing))
         }
-        AppGraph.uiStateStore.updatePlayback { it.copy(isPlaying = player.isPlaying) }
         mediaSession.setPlaybackState(playbackStateFor(player.isPlaying))
     }
 
-    private fun playNext() {
-        val nextTrack = nextTrackForCurrentContext()
-        prepareTrack(nextTrack, playImmediately = true, reason = "下一首")
+    private fun playNext(autoAdvance: Boolean = false) {
+        val nextTrack = nextTrackForCurrentContext(autoAdvance = autoAdvance)
+        val reason = if (autoAdvance && queueMode == QueueMode.SINGLE_REPEAT) {
+            getString(R.string.message_single_repeat)
+        } else {
+            getString(R.string.message_next_track)
+        }
+        prepareTrack(nextTrack, playImmediately = true, reason = reason)
     }
 
     private fun playPrevious() {
-        val previousTrack = queueEngine.previous(currentTrack)
-        prepareTrack(previousTrack, playImmediately = true, reason = "上一首")
+        val previousTrack = previousTrackForCurrentContext()
+        prepareTrack(
+            previousTrack,
+            playImmediately = true,
+            reason = getString(R.string.message_previous_track),
+        )
+    }
+
+    private fun playTrackById(trackId: String?) {
+        if (trackId.isNullOrBlank()) {
+            updatePlaybackSnapshot(getString(R.string.message_track_not_found))
+            return
+        }
+
+        val targetTrack = queueEngine.findTrackById(trackId)
+        if (targetTrack == null) {
+            updatePlaybackSnapshot(getString(R.string.message_track_not_found))
+            return
+        }
+
+        queueEngine.selectTrack(
+            track = targetTrack,
+            current = currentTrack,
+            activeLabel = activeQueueLabel(),
+        )
+        prepareTrack(
+            targetTrack,
+            playImmediately = true,
+            reason = getString(R.string.message_jump_to_track, targetTrack.displayTitle()),
+        )
     }
 
     private fun onStableModeChanged(mode: PlaybackMode) {
+        if (debugModeEnabled) return
+        applyPlaybackMode(
+            mode,
+            getString(R.string.message_heart_rate_settled_mode, mode.toLabel().label()),
+        )
+    }
+
+    private fun setDebugModeEnabled(enabled: Boolean) {
+        if (debugModeEnabled == enabled) {
+            updatePlaybackSnapshot(
+                if (enabled) {
+                    getString(R.string.message_debug_enabled_hint)
+                } else {
+                    getString(R.string.message_debug_disabled)
+                }
+            )
+            return
+        }
+
+        debugModeEnabled = enabled
+        AppGraph.uiStateStore.setDebugModeEnabled(enabled)
+        if (enabled) {
+            fadeJob?.cancel()
+            fadeJob = null
+            player.volume = 1f
+            heartRateSensorController.stop()
+            publishDebugHeartRateSnapshot()
+            updatePlaybackSnapshot(getString(R.string.message_debug_enabled_hint))
+        } else {
+            currentMode = PlaybackMode.CALM
+            AppGraph.uiStateStore.setPlaybackMode(PlaybackMode.CALM)
+            refreshPlaylistCache()
+            heartRateSensorController.resetClassifier()
+            heartRateSensorController.start()
+            updatePlaybackSnapshot(getString(R.string.message_debug_disabled_restore))
+        }
+    }
+
+    private fun toggleDebugPlaybackMode() {
+        if (!debugModeEnabled) {
+            updatePlaybackSnapshot(getString(R.string.message_enable_debug_first))
+            return
+        }
+
+        val nextMode = when (currentMode) {
+            PlaybackMode.CALM -> PlaybackMode.EXCITED
+            PlaybackMode.EXCITED -> PlaybackMode.CALM
+        }
+        if (!adaptiveEnabled) {
+            currentMode = nextMode
+            AppGraph.uiStateStore.setPlaybackMode(nextMode)
+            publishDebugHeartRateSnapshot()
+            updatePlaybackSnapshot(
+                getString(R.string.message_debug_switched_mode_no_adaptive, nextMode.toLabel().label())
+            )
+            return
+        }
+        applyPlaybackMode(
+            nextMode,
+            getString(R.string.message_debug_switched_mode, nextMode.toLabel().label()),
+        )
+    }
+
+    private fun applyPlaybackMode(mode: PlaybackMode, settledMessage: String) {
         currentMode = mode
         AppGraph.uiStateStore.setPlaybackMode(mode)
+        if (debugModeEnabled) {
+            publishDebugHeartRateSnapshot()
+        }
         if (!adaptiveEnabled) {
+            updatePlaybackSnapshot(settledMessage)
             return
         }
 
         val targetLabel = mode.toLabel()
+        refreshPlaylistCache()
         if (currentTrack?.finalLabel == targetLabel) {
-            AppGraph.uiStateStore.setMessage("心率稳定，当前处于${labelText(targetLabel)}模式")
+            updatePlaybackSnapshot(settledMessage)
             return
         }
 
         if (!queueEngine.hasLabel(targetLabel)) {
-            AppGraph.uiStateStore.setMessage("当前没有${labelText(targetLabel)}歌曲可播放")
+            updatePlaybackSnapshot(getString(R.string.message_no_tracks_for_label, targetLabel.label()))
             return
         }
 
-        val targetTrack = queueEngine.nextForLabel(targetLabel, currentTrack)
-        serviceScope.launch {
-            switchTrackWithFade(targetTrack, "已切换到${labelText(targetLabel)}模式")
+        val targetTrack = nextTrackForLabel(
+            label = targetLabel,
+            repeatCurrent = false,
+        )
+        fadeJob?.cancel()
+        fadeJob = serviceScope.launch {
+            switchTrackWithFade(targetTrack, settledMessage)
+        }
+    }
+
+    private fun publishDebugHeartRateSnapshot() {
+        AppGraph.uiStateStore.updateHeartRate {
+            it.copy(
+                bpm = null,
+                mode = currentMode,
+                availability = SensorAvailability.STOPPED,
+                message = getString(R.string.message_debug_heart_rate),
+            )
         }
     }
 
@@ -227,15 +419,18 @@ class AdaptivePlaybackService : Service() {
     private fun prepareTrack(track: LocalTrack?, playImmediately: Boolean, reason: String) {
         if (track == null) {
             Log.w(TAG, "prepareTrack called with null track")
-            AppGraph.uiStateStore.setMessage("当前没有可播放的歌曲")
+            refreshPlaylistCache()
+            updatePlaybackSnapshot(getString(R.string.message_no_tracks_available))
+            updateNotification()
             return
         }
 
         Log.d(
             TAG,
-            "Preparing track: ${track.title} (${track.file.absolutePath}), playImmediately=$playImmediately",
+            "Preparing track: ${track.displayTitle()} (${track.file.absolutePath}), playImmediately=$playImmediately",
         )
         currentTrack = track
+        refreshPlaylistCache()
         val mediaItem = MediaItem.Builder()
             .setUri(track.file.toUri())
             .setMediaId(track.id)
@@ -245,37 +440,121 @@ class AdaptivePlaybackService : Service() {
         player.setMediaItem(mediaItem)
         player.playWhenReady = playImmediately
         player.prepare()
-        if (!playImmediately) {
-            player.pause()
-        }
 
-        AppGraph.uiStateStore.updatePlayback {
-            it.copy(
-                currentTrack = track,
-                isPlaying = playImmediately,
-                playbackMode = currentMode,
-                lastMessage = reason,
-                isAdaptiveEnabled = adaptiveEnabled,
-            )
-        }
+        updatePlaybackSnapshot(reason)
         mediaSession.setPlaybackState(playbackStateFor(playImmediately))
         updateNotification()
     }
 
-    private fun nextTrackForCurrentContext(): LocalTrack? {
-        if (adaptiveEnabled) {
-            val targetLabel = currentMode.toLabel()
-            if (queueEngine.hasLabel(targetLabel)) {
-                return queueEngine.nextForLabel(targetLabel, currentTrack)
-            }
-            currentTrack?.finalLabel?.let { fallback ->
-                if (queueEngine.hasLabel(fallback)) {
-                    AppGraph.uiStateStore.setMessage("没有${labelText(targetLabel)}歌曲，继续当前队列")
-                    return queueEngine.nextForLabel(fallback, currentTrack)
+    private fun nextTrackForCurrentContext(autoAdvance: Boolean): LocalTrack? {
+        val label = activeQueueLabel()
+        return if (label != null) {
+            nextTrackForLabel(label, repeatCurrent = queueMode == QueueMode.SINGLE_REPEAT && autoAdvance)
+        } else {
+            queueEngine.nextCombined(
+                current = currentTrack,
+                queueMode = queueMode,
+                repeatCurrent = queueMode == QueueMode.SINGLE_REPEAT && autoAdvance,
+            )
+        }
+    }
+
+    private fun nextTrackForLabel(
+        label: TrackLabel,
+        repeatCurrent: Boolean,
+    ): LocalTrack? {
+        return queueEngine.nextForLabel(
+            label = label,
+            current = currentTrack,
+            queueMode = queueMode,
+            repeatCurrent = repeatCurrent,
+        )
+    }
+
+    private fun previousTrackForCurrentContext(): LocalTrack? {
+        val label = activeQueueLabel()
+        return if (label != null) {
+            queueEngine.previousForLabel(label, currentTrack, queueMode)
+        } else {
+            queueEngine.previousCombined(currentTrack, queueMode)
+        }
+    }
+
+    private fun activeQueueLabel(): TrackLabel? {
+        if (!adaptiveEnabled) return null
+
+        val preferred = currentMode.toLabel()
+        if (queueEngine.hasLabel(preferred)) {
+            return preferred
+        }
+
+        val fallback = currentTrack?.finalLabel
+        return if (fallback != null && queueEngine.hasLabel(fallback)) fallback else null
+    }
+
+    private fun currentPlaylist(): List<LocalTrack> {
+        val label = activeQueueLabel()
+        return if (label != null) {
+            queueEngine.playlistForLabel(label, queueMode)
+        } else {
+            queueEngine.playlistForCombined(queueMode)
+        }
+    }
+
+    private fun refreshPlaylistCache() {
+        cachedPlaylist = currentPlaylist()
+    }
+
+    private fun updatePlaybackSnapshot(message: String? = null) {
+        val durationMs = player.duration
+            .takeIf { it > 0 }
+            ?: currentTrack?.durationMs
+            ?: 0L
+        val positionMs = player.currentPosition.coerceAtLeast(0L).coerceAtMost(durationMs)
+        val progressPercent = if (durationMs > 0) {
+            (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+        val playlist = cachedPlaylist
+
+        AppGraph.uiStateStore.updatePlayback { snapshot ->
+            snapshot.copy(
+                currentTrack = currentTrack,
+                isPlaying = player.isPlaying,
+                isAdaptiveEnabled = adaptiveEnabled,
+                isDebugModeEnabled = debugModeEnabled,
+                playbackMode = currentMode,
+                lastMessage = message ?: snapshot.lastMessage,
+                displayTitle = currentTrack?.displayTitle() ?: getString(R.string.track_not_ready),
+                durationMs = durationMs,
+                positionMs = positionMs,
+                progressPercent = progressPercent,
+                volumePercent = cachedVolumePercent,
+                queueMode = queueMode,
+                playlistTracks = playlist,
+            )
+        }
+    }
+
+    private fun currentVolumePercent(): Int {
+        val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        if (maxVolume <= 0) return 0
+        val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        return (currentVolume * 100f / maxVolume.toFloat()).roundToInt().coerceIn(0, 100)
+    }
+
+    private fun startPlaybackTicker() {
+        serviceScope.launch {
+            while (isActive) {
+                if (player.isPlaying) {
+                    updatePlaybackSnapshot()
+                    delay(300L)
+                } else {
+                    delay(1000L)
                 }
             }
         }
-        return queueEngine.nextCombined(currentTrack)
     }
 
     private fun buildNotification(): Notification {
@@ -287,24 +566,30 @@ class AdaptivePlaybackService : Service() {
         )
         val previousAction = NotificationCompat.Action(
             R.drawable.ic_skip_previous,
-            "上一首",
+            getString(R.string.previous),
             pendingServiceAction(ServiceIntents.ACTION_PREVIOUS, 2),
         )
         val playPauseAction = NotificationCompat.Action(
             if (player.isPlaying) R.drawable.ic_pause else R.drawable.ic_play,
-            if (player.isPlaying) "暂停" else "播放",
+            getString(if (player.isPlaying) R.string.pause else R.string.play),
             pendingServiceAction(ServiceIntents.ACTION_TOGGLE_PLAY, 3),
         )
         val nextAction = NotificationCompat.Action(
             R.drawable.ic_skip_next,
-            "下一首",
+            getString(R.string.next),
             pendingServiceAction(ServiceIntents.ACTION_NEXT, 4),
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(currentTrack?.title ?: getString(R.string.app_name))
-            .setContentText(currentTrack?.artist ?: "跑步心率自适应播放器")
+            .setContentTitle(currentTrack?.displayTitle() ?: getString(R.string.app_name))
+            .setContentText(
+                getString(
+                    R.string.notification_content_format,
+                    currentMode.toLabel().label(),
+                    queueMode.label(),
+                )
+            )
             .setContentIntent(contentIntent)
             .setOnlyAlertOnce(true)
             .setOngoing(player.isPlaying)
@@ -345,23 +630,32 @@ class AdaptivePlaybackService : Service() {
 
     private val playbackListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            mediaSession.setPlaybackState(playbackStateFor(isPlaying))
-            AppGraph.uiStateStore.updatePlayback { it.copy(isPlaying = isPlaying) }
             Log.d(TAG, "Playback isPlaying changed: $isPlaying")
+            updatePlaybackSnapshot(
+                if (isPlaying) {
+                    getString(R.string.message_playing)
+                } else if (player.playbackState == Player.STATE_READY) {
+                    getString(R.string.message_paused)
+                } else {
+                    null
+                }
+            )
+            mediaSession.setPlaybackState(playbackStateFor(isPlaying))
             updateNotification()
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             when (playbackState) {
-                Player.STATE_BUFFERING -> AppGraph.uiStateStore.setMessage("正在缓冲音频…")
+                Player.STATE_BUFFERING -> updatePlaybackSnapshot(getString(R.string.message_buffering_audio))
                 Player.STATE_READY -> {
-                    if (currentTrack != null) {
-                        AppGraph.uiStateStore.setMessage(
-                            if (player.isPlaying) "正在播放" else "已就绪，点击播放"
-                        )
+                    if (!player.isPlaying && currentTrack != null) {
+                        updatePlaybackSnapshot(getString(R.string.message_ready_tap_to_play))
+                    } else {
+                        updatePlaybackSnapshot()
                     }
                 }
-                Player.STATE_ENDED -> playNext()
+                Player.STATE_ENDED -> playNext(autoAdvance = true)
+                else -> updatePlaybackSnapshot()
             }
             Log.d(TAG, "Playback state changed: $playbackState")
         }
@@ -369,13 +663,12 @@ class AdaptivePlaybackService : Service() {
         override fun onPlayerError(error: PlaybackException) {
             val failingTrack = currentTrack
             Log.e(TAG, "Playback error for ${failingTrack?.file?.absolutePath}", error)
-            AppGraph.uiStateStore.updatePlayback { it.copy(isPlaying = false) }
-            AppGraph.uiStateStore.setMessage(
+            updatePlaybackSnapshot(
                 buildString {
-                    append("播放失败")
+                    append(getString(R.string.message_playback_failed))
                     if (failingTrack != null) {
                         append("：")
-                        append(failingTrack.title)
+                        append(failingTrack.displayTitle())
                     }
                     error.localizedMessage?.takeIf { it.isNotBlank() }?.let {
                         append("（")
@@ -391,7 +684,7 @@ class AdaptivePlaybackService : Service() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "音乐播放",
+            getString(R.string.notification_channel_playback),
             NotificationManager.IMPORTANCE_LOW,
         )
         val manager = getSystemService(NotificationManager::class.java)
@@ -402,9 +695,5 @@ class AdaptivePlaybackService : Service() {
         private const val TAG = "RunnerSmartPlayer"
         private const val CHANNEL_ID = "runner_player_playback"
         private const val NOTIFICATION_ID = 1001
-    }
-
-    private fun labelText(label: com.runner.smartplayer.watch.model.TrackLabel): String {
-        return if (label.value() == "calm") "舒缓" else "激动"
     }
 }

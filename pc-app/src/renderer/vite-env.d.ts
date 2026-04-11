@@ -6,6 +6,7 @@ import type {
   AdbPushResult,
   AnalyzedTrack,
   ExportResult,
+  PushProgressUpdate,
   RemoteMusicListing,
   ScanProgressUpdate,
   ScanResult,
@@ -18,6 +19,7 @@ declare global {
       pickExportFolder: () => Promise<string | null>;
       scanFolder: (sourceFolder: string) => Promise<ScanResult>;
       onScanProgress: (listener: (progress: ScanProgressUpdate) => void) => () => void;
+      onPushProgress: (listener: (progress: PushProgressUpdate) => void) => () => void;
       exportLibrary: (payload: {
         libraryName: string;
         outputDirectory: string;

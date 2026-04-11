@@ -4,6 +4,7 @@ import type {
   AdbPushResult,
   AnalyzedTrack,
   ExportResult,
+  PushProgressUpdate,
   RemoteMusicListing,
   ScanProgressUpdate,
   ScanResult,
@@ -23,6 +24,15 @@ contextBridge.exposeInMainWorld("runnerApp", {
     ipcRenderer.on("runner:scan-progress", wrappedListener);
     return () => {
       ipcRenderer.removeListener("runner:scan-progress", wrappedListener);
+    };
+  },
+  onPushProgress: (listener: (progress: PushProgressUpdate) => void): (() => void) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, payload: PushProgressUpdate) => {
+      listener(payload);
+    };
+    ipcRenderer.on("runner:push-progress", wrappedListener);
+    return () => {
+      ipcRenderer.removeListener("runner:push-progress", wrappedListener);
     };
   },
   exportLibrary: (payload: {

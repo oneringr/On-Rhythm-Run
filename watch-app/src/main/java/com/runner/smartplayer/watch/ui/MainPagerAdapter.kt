@@ -12,6 +12,7 @@ class MainPagerAdapter(
     override fun createFragment(position: Int): Fragment = when (position) {
         0 -> PlayerFragment()
         1 -> RunModeFragment()
-        else -> LibraryFragment()
+        2 -> LibraryFragment()
+        else -> throw IndexOutOfBoundsException("Invalid tab position: $position")
     }
 }

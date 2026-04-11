@@ -9,6 +9,11 @@ enum class TrackLabel {
 
     fun value(): String = name.lowercase()
 
+    fun label(): String = when (this) {
+        CALM -> "舒缓"
+        EXCITED -> "激动"
+    }
+
     companion object {
         fun fromValue(value: String): TrackLabel? =
             entries.firstOrNull { it.value() == value.lowercase() }
@@ -22,6 +27,24 @@ enum class PlaybackMode {
     fun toLabel(): TrackLabel = if (this == EXCITED) TrackLabel.EXCITED else TrackLabel.CALM
 
     fun value(): String = name.lowercase()
+}
+
+enum class QueueMode {
+    SHUFFLE,
+    LIST_LOOP,
+    SINGLE_REPEAT;
+
+    fun next(): QueueMode = when (this) {
+        SHUFFLE -> LIST_LOOP
+        LIST_LOOP -> SINGLE_REPEAT
+        SINGLE_REPEAT -> SHUFFLE
+    }
+
+    fun label(): String = when (this) {
+        SHUFFLE -> "随机"
+        LIST_LOOP -> "循环"
+        SINGLE_REPEAT -> "单曲"
+    }
 }
 
 data class LocalTrack(
@@ -39,6 +62,17 @@ data class LocalTrack(
     val modifiedAt: Instant,
     val file: File,
 )
+
+fun LocalTrack.displayTitle(): String {
+    val hasMetadata = title.isNotBlank() &&
+        artist.isNotBlank() &&
+        artist != UNKNOWN_ARTIST
+    return if (hasMetadata) {
+        "$title - $artist"
+    } else {
+        sourceFileName.ifBlank { file.name }
+    }
+}
 
 data class RunnerLibrary(
     val libraryName: String,
@@ -75,8 +109,16 @@ data class PlaybackSnapshot(
     val currentTrack: LocalTrack? = null,
     val isPlaying: Boolean = false,
     val isAdaptiveEnabled: Boolean = true,
+    val isDebugModeEnabled: Boolean = false,
     val playbackMode: PlaybackMode = PlaybackMode.CALM,
     val lastMessage: String = "准备就绪",
+    val displayTitle: String = "尚未载入歌曲",
+    val durationMs: Long = 0L,
+    val positionMs: Long = 0L,
+    val progressPercent: Float = 0f,
+    val volumePercent: Int = 50,
+    val queueMode: QueueMode = QueueMode.SHUFFLE,
+    val playlistTracks: List<LocalTrack> = emptyList(),
 )
 
 data class AppUiState(
@@ -84,3 +126,5 @@ data class AppUiState(
     val playback: PlaybackSnapshot = PlaybackSnapshot(),
     val heartRate: HeartRateSnapshot = HeartRateSnapshot(),
 )
+
+const val UNKNOWN_ARTIST = "未知歌手"

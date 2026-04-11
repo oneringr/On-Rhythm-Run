@@ -80,6 +80,35 @@ describe("ExportBuilder", () => {
     expect(result.trackCount).toBe(1);
     expect(manifest.tracks.map((track) => track.sourceFileName)).toEqual(["tempo.mp3"]);
   });
+
+  it("sanitizes invalid file-name characters in exported relative paths", async () => {
+    const sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "runner-source-"));
+    const outputRoot = await fs.mkdtemp(path.join(os.tmpdir(), "runner-output-"));
+    cleanupPaths.push(sourceRoot, outputRoot);
+
+    const sourceTrackPath = path.join(sourceRoot, "tempo.mp3");
+    await fs.writeFile(sourceTrackPath, "stub mp3");
+
+    const builder = new ExportBuilder();
+    const result = await builder.exportLibrary({
+      libraryName: "Tempo Pack",
+      outputDirectory: outputRoot,
+      tracks: [
+        {
+          ...makeTrack(sourceTrackPath),
+          sourceFileName: "tempo?:mix*.mp3",
+        },
+      ],
+    });
+
+    const manifestRaw = await fs.readFile(result.manifestPath, "utf8");
+    const manifest = JSON.parse(manifestRaw) as {
+      tracks: Array<{ relativePath: string }>;
+    };
+
+    expect(manifest.tracks[0]?.relativePath).toBe("tracks/tempo__mix_.mp3");
+    await expect(fs.stat(path.join(result.outputRoot, "tracks", "tempo__mix_.mp3"))).resolves.toBeTruthy();
+  });
 });
 
 function makeTrack(sourcePath: string): AnalyzedTrack {

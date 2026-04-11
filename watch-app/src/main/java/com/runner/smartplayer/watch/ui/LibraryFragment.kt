@@ -11,6 +11,8 @@ import com.google.android.material.button.MaterialButton
 import com.runner.smartplayer.watch.R
 import com.runner.smartplayer.watch.player.ServiceIntents
 import com.runner.smartplayer.watch.state.AppGraph
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -34,13 +36,16 @@ class LibraryFragment : Fragment(R.layout.fragment_library) {
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                AppGraph.uiStateStore.state.collect { state ->
-                    totalTracksView.text = state.librarySummary.totalTracks.toString()
-                    calmTracksView.text = state.librarySummary.calmTracks.toString()
-                    excitedTracksView.text = state.librarySummary.excitedTracks.toString()
-                    lastImportView.text = state.librarySummary.lastImportedAt?.let { formatter.format(it) } ?: "--"
-                    pathView.text = state.librarySummary.exportDirectory.ifBlank { "未发现导出曲库" }
-                }
+                AppGraph.uiStateStore.state
+                    .map { it.librarySummary }
+                    .distinctUntilChanged()
+                    .collect { summary ->
+                        totalTracksView.text = summary.totalTracks.toString()
+                        calmTracksView.text = summary.calmTracks.toString()
+                        excitedTracksView.text = summary.excitedTracks.toString()
+                        lastImportView.text = summary.lastImportedAt?.let { formatter.format(it) } ?: "--"
+                        pathView.text = summary.exportDirectory.ifBlank { getString(R.string.no_export_found) }
+                    }
             }
         }
     }

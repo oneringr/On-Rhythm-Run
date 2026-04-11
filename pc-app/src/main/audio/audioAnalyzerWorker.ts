@@ -7,6 +7,7 @@ import {
   computeSpectralCentroid,
   estimateBpm,
 } from "./audioFeatures.js";
+import { createAbortError, throwIfAborted } from "../utils/abort.js";
 
 const SAMPLE_RATE = 22_050;
 const require = createRequire(import.meta.url);
@@ -16,10 +17,12 @@ export class AudioAnalyzerWorker {
   async analyze(
     tracks: RawScannedTrack[],
     onProgress?: (progress: ScanProgressUpdate) => void,
+    signal?: AbortSignal,
   ): Promise<AnalyzedTrack[]> {
     const withFeatures = [];
     for (const [index, track] of tracks.entries()) {
-      const samples = await decodeToMonoSamples(track.sourcePath);
+      throwIfAborted(signal);
+      const samples = await decodeToMonoSamples(track.sourcePath, signal);
       withFeatures.push({
         ...track,
         bpm: estimateBpm(samples, SAMPLE_RATE),
@@ -39,18 +42,23 @@ export class AudioAnalyzerWorker {
   }
 }
 
-async function decodeToMonoSamples(filePath: string): Promise<Float32Array> {
+async function decodeToMonoSamples(
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<Float32Array> {
   const binaryPath = ffmpegPath ?? undefined;
   if (!binaryPath) {
     throw new Error("未找到 ffmpeg-static，可执行文件不可用。");
   }
+
+  throwIfAborted(signal);
 
   const pcmBuffer = await new Promise<Buffer>((resolve, reject) => {
     const process: ChildProcessWithoutNullStreams = spawn(binaryPath, [
       "-v",
       "error",
       "-t",
-      "90",
+      "30",
       "-i",
       filePath,
       "-ac",
@@ -64,17 +72,50 @@ async function decodeToMonoSamples(filePath: string): Promise<Float32Array> {
 
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
+    let settled = false;
+
+    const cleanup = () => {
+      signal?.removeEventListener("abort", handleAbort);
+    };
+
+    const finishResolve = (buffer: Buffer) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve(buffer);
+    };
+
+    const finishReject = (error: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    const handleAbort = () => {
+      process.kill();
+      finishReject(createAbortError());
+    };
 
     process.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(Buffer.from(chunk)));
     process.stderr.on("data", (chunk: Buffer) => stderrChunks.push(Buffer.from(chunk)));
-    process.on("error", reject);
+    process.on("error", (error) => {
+      finishReject(error instanceof Error ? error : new Error(String(error)));
+    });
     process.on("close", (code: number | null) => {
       if (code === 0) {
-        resolve(Buffer.concat(stdoutChunks));
+        finishResolve(Buffer.concat(stdoutChunks));
       } else {
-        reject(new Error(Buffer.concat(stderrChunks).toString("utf8") || `ffmpeg exited with ${code}`));
+        finishReject(
+          new Error(Buffer.concat(stderrChunks).toString("utf8") || `ffmpeg exited with ${code}`),
+        );
       }
     });
+    signal?.addEventListener("abort", handleAbort, { once: true });
   });
 
   const totalSamples = Math.floor(pcmBuffer.length / 2);

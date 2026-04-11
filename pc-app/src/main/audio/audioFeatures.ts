@@ -23,22 +23,24 @@ export function computeSpectralCentroid(
 ): number {
   if (samples.length === 0) return 0;
   const analysisWindow = sliceAnalysisWindow(samples, windowSize);
-  const totalBins = Math.floor(analysisWindow.length / 2);
+  const fftSize = nextPowerOfTwo(analysisWindow.length);
+  const real = new Float64Array(fftSize);
+  const imaginary = new Float64Array(fftSize);
+  const totalBins = Math.floor(fftSize / 2);
   let magnitudeSum = 0;
   let weightedSum = 0;
 
-  for (let bin = 0; bin < totalBins; bin += 1) {
-    let real = 0;
-    let imaginary = 0;
-    for (let sampleIndex = 0; sampleIndex < analysisWindow.length; sampleIndex += 1) {
-      const phase = (2 * Math.PI * bin * sampleIndex) / analysisWindow.length;
-      const sample = analysisWindow[sampleIndex] ?? 0;
-      real += sample * Math.cos(phase);
-      imaginary -= sample * Math.sin(phase);
-    }
+  for (let sampleIndex = 0; sampleIndex < analysisWindow.length; sampleIndex += 1) {
+    const windowedSample =
+      (analysisWindow[sampleIndex] ?? 0) * hannWindow(sampleIndex, analysisWindow.length);
+    real[sampleIndex] = windowedSample;
+  }
 
-    const magnitude = Math.sqrt(real * real + imaginary * imaginary);
-    const frequency = (bin * sampleRate) / analysisWindow.length;
+  fftInPlace(real, imaginary);
+
+  for (let bin = 0; bin < totalBins; bin += 1) {
+    const magnitude = Math.hypot(real[bin] ?? 0, imaginary[bin] ?? 0);
+    const frequency = (bin * sampleRate) / fftSize;
     magnitudeSum += magnitude;
     weightedSum += magnitude * frequency;
   }
@@ -119,6 +121,79 @@ function sliceAnalysisWindow(samples: Float32Array, windowSize: number): Float32
   const middle = Math.floor(samples.length / 2);
   const start = Math.max(0, middle - Math.floor(windowSize / 2));
   return samples.slice(start, start + windowSize);
+}
+
+function hannWindow(index: number, length: number): number {
+  if (length <= 1) return 1;
+  return 0.5 * (1 - Math.cos((2 * Math.PI * index) / (length - 1)));
+}
+
+function nextPowerOfTwo(value: number): number {
+  let power = 1;
+  while (power < value) {
+    power <<= 1;
+  }
+  return power;
+}
+
+function fftInPlace(real: Float64Array, imaginary: Float64Array): void {
+  const size = real.length;
+  if (size <= 1) {
+    return;
+  }
+
+  let j = 0;
+  for (let index = 1; index < size; index += 1) {
+    let bit = size >> 1;
+    while (j & bit) {
+      j ^= bit;
+      bit >>= 1;
+    }
+    j ^= bit;
+
+    if (index < j) {
+      [real[index], real[j]] = [real[j] ?? 0, real[index] ?? 0];
+      [imaginary[index], imaginary[j]] = [imaginary[j] ?? 0, imaginary[index] ?? 0];
+    }
+  }
+
+  for (let blockSize = 2; blockSize <= size; blockSize <<= 1) {
+    const halfSize = blockSize >> 1;
+    const theta = (-2 * Math.PI) / blockSize;
+    const phaseShiftStepReal = Math.cos(theta);
+    const phaseShiftStepImaginary = Math.sin(theta);
+
+    for (let blockStart = 0; blockStart < size; blockStart += blockSize) {
+      let currentPhaseReal = 1;
+      let currentPhaseImaginary = 0;
+
+      for (let offset = 0; offset < halfSize; offset += 1) {
+        const evenIndex = blockStart + offset;
+        const oddIndex = evenIndex + halfSize;
+
+        const oddReal = real[oddIndex] ?? 0;
+        const oddImaginary = imaginary[oddIndex] ?? 0;
+        const tempReal =
+          currentPhaseReal * oddReal - currentPhaseImaginary * oddImaginary;
+        const tempImaginary =
+          currentPhaseReal * oddImaginary + currentPhaseImaginary * oddReal;
+
+        real[oddIndex] = (real[evenIndex] ?? 0) - tempReal;
+        imaginary[oddIndex] = (imaginary[evenIndex] ?? 0) - tempImaginary;
+        real[evenIndex] = (real[evenIndex] ?? 0) + tempReal;
+        imaginary[evenIndex] = (imaginary[evenIndex] ?? 0) + tempImaginary;
+
+        const nextPhaseReal =
+          currentPhaseReal * phaseShiftStepReal -
+          currentPhaseImaginary * phaseShiftStepImaginary;
+        const nextPhaseImaginary =
+          currentPhaseReal * phaseShiftStepImaginary +
+          currentPhaseImaginary * phaseShiftStepReal;
+        currentPhaseReal = nextPhaseReal;
+        currentPhaseImaginary = nextPhaseImaginary;
+      }
+    }
+  }
 }
 
 function stats(values: number[]): { mean: number; stdDev: number } {
