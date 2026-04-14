@@ -277,6 +277,10 @@ async function runAdb(args: string[]): Promise<{ stdout: string; stderr: string 
 
 async function resolveAdbExecutable(): Promise<string> {
   const candidates = new Set<string>();
+  for (const bundledCandidate of bundledAdbExecutablePaths()) {
+    candidates.add(bundledCandidate);
+  }
+
   const envSdkPaths = [process.env.ANDROID_SDK_ROOT, process.env.ANDROID_HOME].filter(Boolean) as string[];
   for (const sdkPath of envSdkPaths) {
     candidates.add(path.join(sdkPath, "platform-tools", adbFileName()));
@@ -304,6 +308,17 @@ async function resolveAdbExecutable(): Promise<string> {
   }
 
   return adbFileName();
+}
+
+function bundledAdbExecutablePaths(): string[] {
+  if (process.platform !== "win32") {
+    return [];
+  }
+
+  return [
+    path.join(process.resourcesPath, "adb", "win", adbFileName()),
+    path.resolve(moduleDirectory, "../../../resources/adb/win", adbFileName()),
+  ];
 }
 
 function adbFileName(): string {

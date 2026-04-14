@@ -147,10 +147,32 @@
             app:backgroundTint="@color/surface_alt"
             app:cornerRadius="14dp" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/modeSwitchHapticsButton"
+            style="@style/Widget.MaterialComponents.Button"
+            android:layout_width="match_parent"
+            android:layout_height="38dp"
+            android:layout_marginTop="10dp"
+            android:text="@string/mode_switch_haptics_enabled"
+            android:textAllCaps="false"
+            android:textColor="@color/mint"
+            app:backgroundTint="@color/surface_alt"
+            app:cornerRadius="14dp" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
+            android:background="@drawable/player_panel_background"
+            android:padding="12dp"
+            android:text="@string/mode_switch_haptics_description"
+            android:textColor="@color/foam"
+            android:textSize="12sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
             android:background="@drawable/player_panel_background"
             android:padding="12dp"
             android:text="@string/debug_mode_description"

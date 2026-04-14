@@ -20,4 +20,5 @@ interface StateStore {
     fun setPlaybackMode(mode: PlaybackMode)
     fun setQueueMode(mode: QueueMode)
     fun setHeartRateThreshold(threshold: Int)
+    fun setModeSwitchHapticsEnabled(enabled: Boolean)
 }

@@ -14,10 +14,14 @@ import kotlinx.coroutines.flow.update
 class UiStateStore(
     initialQueueMode: QueueMode = QueueMode.SHUFFLE,
     initialHeartRateThreshold: Int = 160,
+    initialModeSwitchHapticsEnabled: Boolean = true,
 ) : StateStore {
     private val mutableState = MutableStateFlow(
         AppUiState(
-            playback = PlaybackSnapshot(queueMode = initialQueueMode),
+            playback = PlaybackSnapshot(
+                queueMode = initialQueueMode,
+                isModeSwitchHapticsEnabled = initialModeSwitchHapticsEnabled,
+            ),
             heartRate = HeartRateSnapshot(thresholdBpm = initialHeartRateThreshold),
         )
     )
@@ -68,5 +72,9 @@ class UiStateStore(
 
     override fun setHeartRateThreshold(threshold: Int) {
         updateHeartRate { it.copy(thresholdBpm = threshold) }
+    }
+
+    override fun setModeSwitchHapticsEnabled(enabled: Boolean) {
+        updatePlayback { it.copy(isModeSwitchHapticsEnabled = enabled) }
     }
 }

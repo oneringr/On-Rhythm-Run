@@ -26,6 +26,7 @@ class RunModeFragment : Fragment(R.layout.fragment_run_mode) {
         val heartRateStatus = view.findViewById<TextView>(R.id.runModeSensorStatus)
         val currentMode = view.findViewById<TextView>(R.id.currentModeValue)
         val debugModeButton = view.findViewById<MaterialButton>(R.id.debugModeButton)
+        val modeSwitchHapticsButton = view.findViewById<MaterialButton>(R.id.modeSwitchHapticsButton)
         val thresholdValue = view.findViewById<TextView>(R.id.heartRateThresholdValue)
         val thresholdDescription = view.findViewById<TextView>(R.id.heartRateThresholdDescription)
         val thresholdDecreaseButton = view.findViewById<MaterialButton>(R.id.thresholdDecreaseButton)
@@ -45,6 +46,14 @@ class RunModeFragment : Fragment(R.layout.fragment_run_mode) {
                 requireContext(),
                 ServiceIntents.ACTION_TOGGLE_DEBUG_MODE,
                 debugEnabled = enabled,
+            )
+        }
+        modeSwitchHapticsButton.setOnClickListener {
+            val enabled = !(AppGraph.uiStateStore.state.value.playback.isModeSwitchHapticsEnabled)
+            ServiceIntents.send(
+                requireContext(),
+                ServiceIntents.ACTION_SET_MODE_SWITCH_HAPTICS_ENABLED,
+                modeSwitchHapticsEnabled = enabled,
             )
         }
         thresholdDecreaseButton.setOnClickListener {
@@ -74,6 +83,7 @@ class RunModeFragment : Fragment(R.layout.fragment_run_mode) {
                             heartRate = state.heartRate,
                             isAdaptiveEnabled = state.playback.isAdaptiveEnabled,
                             isDebugModeEnabled = state.playback.isDebugModeEnabled,
+                            isModeSwitchHapticsEnabled = state.playback.isModeSwitchHapticsEnabled,
                             heartRateThreshold = state.heartRate.thresholdBpm,
                         )
                     }
@@ -104,6 +114,11 @@ class RunModeFragment : Fragment(R.layout.fragment_run_mode) {
                         } else {
                             getString(R.string.debug_mode_disabled)
                         }
+                        modeSwitchHapticsButton.text = if (viewState.isModeSwitchHapticsEnabled) {
+                            getString(R.string.mode_switch_haptics_enabled)
+                        } else {
+                            getString(R.string.mode_switch_haptics_disabled)
+                        }
                     }
             }
         }
@@ -113,6 +128,7 @@ class RunModeFragment : Fragment(R.layout.fragment_run_mode) {
         val heartRate: HeartRateSnapshot,
         val isAdaptiveEnabled: Boolean,
         val isDebugModeEnabled: Boolean,
+        val isModeSwitchHapticsEnabled: Boolean,
         val heartRateThreshold: Int,
     )
 }

@@ -37,11 +37,13 @@ class UiStateStoreTest {
         val store = UiStateStore(
             initialQueueMode = QueueMode.LIST_LOOP,
             initialHeartRateThreshold = 170,
+            initialModeSwitchHapticsEnabled = false,
         )
 
         val state = store.state.value
         assertEquals(QueueMode.LIST_LOOP, state.playback.queueMode)
         assertEquals(170, state.heartRate.thresholdBpm)
+        assertEquals(false, state.playback.isModeSwitchHapticsEnabled)
     }
 
     @Test
@@ -50,9 +52,11 @@ class UiStateStoreTest {
 
         store.setQueueMode(QueueMode.SINGLE_REPEAT)
         store.setHeartRateThreshold(165)
+        store.setModeSwitchHapticsEnabled(false)
 
         val state = store.state.value
         assertEquals(QueueMode.SINGLE_REPEAT, state.playback.queueMode)
         assertEquals(165, state.heartRate.thresholdBpm)
+        assertEquals(false, state.playback.isModeSwitchHapticsEnabled)
     }
 }

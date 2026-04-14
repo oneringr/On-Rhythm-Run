@@ -119,6 +119,7 @@ data class PlaybackSnapshot(
     val isPlaying: Boolean = false,
     val isAdaptiveEnabled: Boolean = true,
     val isDebugModeEnabled: Boolean = false,
+    val isModeSwitchHapticsEnabled: Boolean = true,
     val playbackMode: PlaybackMode = PlaybackMode.CALM,
     val lastMessage: String = "准备就绪",
     val displayTitle: String = "尚未载入歌曲",

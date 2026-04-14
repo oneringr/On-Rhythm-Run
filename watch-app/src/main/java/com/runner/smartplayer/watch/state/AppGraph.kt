@@ -26,6 +26,7 @@ object AppGraph {
         UiStateStore(
             initialQueueMode = preferences.queueMode,
             initialHeartRateThreshold = preferences.heartRateThreshold,
+            initialModeSwitchHapticsEnabled = preferences.modeSwitchHapticsEnabled,
         )
     }
     val playerConfig: PlayerConfig by lazy { PlayerConfig() }

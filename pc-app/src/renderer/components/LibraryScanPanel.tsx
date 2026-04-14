@@ -101,6 +101,10 @@ export function LibraryScanPanel({
         <div className="path-block">
           <span className="field-label">导出目录</span>
           <span>{exportFolder || "尚未选择导出目录"}</span>
+          <span className="support-hint">
+            如果不通过 ADB 推送，导出完成后可把手表切换到 USB“传输文件”模式，
+            再手动将 <code>RunnerPlayerExport</code> 放到 <code>/sdcard/Music</code> 下。
+          </span>
         </div>
       </section>
     </>

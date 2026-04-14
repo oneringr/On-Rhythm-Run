@@ -24,6 +24,7 @@ class AdaptiveModeManagerTest {
         val messages = testMessages()
         var refreshed = 0
         var lastMessage = ""
+        var feedbackPairs = emptyList<Pair<PlaybackMode, PlaybackMode>>()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
 
         val manager = AdaptiveModeManager(
@@ -38,6 +39,8 @@ class AdaptiveModeManagerTest {
             onSwitchTrackWithFade = { _, _ -> },
             onUpdateMessage = { lastMessage = it },
             onPublishDebugHeartRateSnapshot = { _, _ -> },
+            isModeSwitchFeedbackEnabled = { true },
+            onModeSwitchFeedback = { from, to -> feedbackPairs += from to to },
         )
 
         manager.setAdaptiveEnabled(false, messages)
@@ -46,6 +49,7 @@ class AdaptiveModeManagerTest {
         assertFalse(store.state.value.playback.isAdaptiveEnabled)
         assertEquals(1, refreshed)
         assertEquals(messages.adaptiveDisabled, lastMessage)
+        assertEquals(emptyList<Pair<PlaybackMode, PlaybackMode>>(), feedbackPairs)
         scope.cancel()
     }
 
@@ -57,6 +61,7 @@ class AdaptiveModeManagerTest {
         var resetPlaybackVolume = 0
         var publishedSnapshot: Pair<PlaybackMode, String>? = null
         var lastMessage = ""
+        var feedbackCalls = 0
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
 
         val manager = AdaptiveModeManager(
@@ -73,6 +78,8 @@ class AdaptiveModeManagerTest {
             onPublishDebugHeartRateSnapshot = { mode, message ->
                 publishedSnapshot = mode to message
             },
+            isModeSwitchFeedbackEnabled = { true },
+            onModeSwitchFeedback = { _, _ -> feedbackCalls += 1 },
         )
 
         manager.setDebugModeEnabled(true, messages)
@@ -83,6 +90,7 @@ class AdaptiveModeManagerTest {
         assertEquals(1, resetPlaybackVolume)
         assertEquals(PlaybackMode.CALM to messages.debugHeartRate, publishedSnapshot)
         assertEquals(messages.debugEnabledHint, lastMessage)
+        assertEquals(0, feedbackCalls)
         scope.cancel()
     }
 
@@ -94,6 +102,7 @@ class AdaptiveModeManagerTest {
         var lastMessage = ""
         var fadeSwitchCalls = 0
         var publishedSnapshot: Pair<PlaybackMode, String>? = null
+        var feedbackPair: Pair<PlaybackMode, PlaybackMode>? = null
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
 
         val manager = AdaptiveModeManager(
@@ -110,6 +119,8 @@ class AdaptiveModeManagerTest {
             onPublishDebugHeartRateSnapshot = { mode, message ->
                 publishedSnapshot = mode to message
             },
+            isModeSwitchFeedbackEnabled = { true },
+            onModeSwitchFeedback = { from, to -> feedbackPair = from to to },
         )
 
         manager.setDebugModeEnabled(true, messages)
@@ -124,6 +135,7 @@ class AdaptiveModeManagerTest {
             publishedSnapshot,
         )
         assertEquals(messages.debugSwitchedModeNoAdaptive(PlaybackMode.EXCITED), lastMessage)
+        assertEquals(PlaybackMode.CALM to PlaybackMode.EXCITED, feedbackPair)
         scope.cancel()
     }
 
@@ -135,6 +147,7 @@ class AdaptiveModeManagerTest {
         val excitedTrack = buildTrack("excited", TrackLabel.EXCITED)
         var switchedToTrack: LocalTrack? = null
         var switchedMessage = ""
+        var feedbackPair: Pair<PlaybackMode, PlaybackMode>? = null
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
 
         val manager = AdaptiveModeManager(
@@ -152,6 +165,8 @@ class AdaptiveModeManagerTest {
             },
             onUpdateMessage = {},
             onPublishDebugHeartRateSnapshot = { _, _ -> },
+            isModeSwitchFeedbackEnabled = { true },
+            onModeSwitchFeedback = { from, to -> feedbackPair = from to to },
         )
 
         manager.onStableModeChanged(PlaybackMode.EXCITED, messages)
@@ -159,6 +174,7 @@ class AdaptiveModeManagerTest {
         assertEquals(PlaybackMode.EXCITED, manager.currentMode)
         assertEquals(excitedTrack.id, switchedToTrack?.id)
         assertEquals(messages.settledMode(PlaybackMode.EXCITED), switchedMessage)
+        assertEquals(PlaybackMode.CALM to PlaybackMode.EXCITED, feedbackPair)
         scope.cancel()
     }
 

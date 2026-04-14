@@ -35,6 +35,8 @@ class AdaptiveModeManager(
     private val onSwitchTrackWithFade: suspend (LocalTrack?, String) -> Unit,
     private val onUpdateMessage: (String) -> Unit,
     private val onPublishDebugHeartRateSnapshot: (PlaybackMode, String) -> Unit,
+    private val isModeSwitchFeedbackEnabled: () -> Boolean,
+    private val onModeSwitchFeedback: (PlaybackMode, PlaybackMode) -> Unit,
 ) {
     var adaptiveEnabled: Boolean = true
         private set
@@ -106,14 +108,15 @@ class AdaptiveModeManager(
             PlaybackMode.CALM -> PlaybackMode.EXCITED
             PlaybackMode.EXCITED -> PlaybackMode.CALM
         }
-        if (!adaptiveEnabled) {
-            currentMode = nextMode
-            stateStore.setPlaybackMode(nextMode)
-            onPublishDebugHeartRateSnapshot(nextMode, messages.debugHeartRate)
-            onUpdateMessage(messages.debugSwitchedModeNoAdaptive(nextMode))
-            return
-        }
-        applyPlaybackMode(nextMode, messages.debugSwitchedMode(nextMode), messages)
+        applyPlaybackMode(
+            nextMode,
+            if (adaptiveEnabled) {
+                messages.debugSwitchedMode(nextMode)
+            } else {
+                messages.debugSwitchedModeNoAdaptive(nextMode)
+            },
+            messages,
+        )
     }
 
     fun cancel() {
@@ -126,10 +129,18 @@ class AdaptiveModeManager(
         settledMessage: String,
         messages: AdaptiveModeMessages,
     ) {
+        val previousMode = currentMode
         currentMode = mode
         stateStore.setPlaybackMode(mode)
         if (debugModeEnabled) {
             onPublishDebugHeartRateSnapshot(mode, messages.debugHeartRate)
+        }
+        if (
+            previousMode != mode &&
+            (adaptiveEnabled || debugModeEnabled) &&
+            isModeSwitchFeedbackEnabled()
+        ) {
+            onModeSwitchFeedback(previousMode, mode)
         }
         if (!adaptiveEnabled) {
             onUpdateMessage(settledMessage)

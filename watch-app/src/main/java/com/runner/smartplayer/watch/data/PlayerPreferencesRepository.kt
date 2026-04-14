@@ -10,6 +10,7 @@ import com.runner.smartplayer.watch.model.QueueMode
 data class PlayerPreferences(
     val queueMode: QueueMode = QueueMode.SHUFFLE,
     val heartRateThreshold: Int = DEFAULT_HEART_RATE_THRESHOLD,
+    val modeSwitchHapticsEnabled: Boolean = true,
 )
 
 class PlayerPreferencesRepository(
@@ -29,6 +30,7 @@ class PlayerPreferencesRepository(
         return PlayerPreferences(
             queueMode = queueMode,
             heartRateThreshold = heartRateThreshold,
+            modeSwitchHapticsEnabled = preferences.getBoolean(KEY_MODE_SWITCH_HAPTICS_ENABLED, true),
         )
     }
 
@@ -46,6 +48,12 @@ class PlayerPreferencesRepository(
         return sanitized
     }
 
+    fun saveModeSwitchHapticsEnabled(enabled: Boolean) {
+        preferences.edit()
+            .putBoolean(KEY_MODE_SWITCH_HAPTICS_ENABLED, enabled)
+            .apply()
+    }
+
     private fun sanitizeThreshold(threshold: Int): Int {
         return threshold.coerceIn(MIN_HEART_RATE_THRESHOLD, MAX_HEART_RATE_THRESHOLD)
     }
@@ -54,5 +62,6 @@ class PlayerPreferencesRepository(
         const val PREFERENCES_NAME = "runner_player_preferences"
         const val KEY_QUEUE_MODE = "queue_mode"
         const val KEY_HEART_RATE_THRESHOLD = "heart_rate_threshold"
+        const val KEY_MODE_SWITCH_HAPTICS_ENABLED = "mode_switch_haptics_enabled"
     }
 }

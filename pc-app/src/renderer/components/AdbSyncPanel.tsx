@@ -44,7 +44,7 @@ export function AdbSyncPanel({
     <section className="panel-card">
       <div className="panel-header">
         <div>
-          <span className="field-label">ADB 同步</span>
+          <span className="field-label">内置 ADB 同步</span>
           <h2>推送到 /sdcard/Music</h2>
         </div>
         <button
@@ -116,6 +116,9 @@ export function AdbSyncPanel({
       <div className="path-block">
         <span className="field-label">设备状态</span>
         <span>{deviceStatus}</span>
+        <span className="support-hint">
+          当前 Windows 包会优先使用内置 ADB；如果不想开调试，也可以先导出，再把手表切到 USB“传输文件”模式后手动放置文件。
+        </span>
         <span className="support-hint">
           “一键推送歌曲”会发送到 <code>/sdcard/Music/曲库名</code>，
           “推送完整曲库”会发送到 <code>/sdcard/Music/RunnerPlayerExport</code> 并附带 <code>runner_manifest.json</code>。

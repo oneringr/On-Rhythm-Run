@@ -118,7 +118,15 @@ export function useLibraryScan() {
         outputDirectory: exportFolder,
         tracks: exportableTracks,
       });
-      setStatus(`已导出 ${result.trackCount} 首歌曲到 ${result.outputRoot}`);
+      setStatus(`已导出 ${result.trackCount} 首歌曲到 ${result.outputRoot}。如果不使用 ADB，请把手表切到 USB“传输文件”模式后手动放置文件。`);
+      window.alert(
+        [
+          `导出完成：${result.outputRoot}`,
+          "",
+          "如果不通过 ADB 推送，请在手表上选择 USB“传输文件”模式。",
+          "然后把 RunnerPlayerExport 文件夹手动放到手表的 /sdcard/Music/ 下。",
+        ].join("\n"),
+      );
     } catch (error) {
       setStatus(toErrorMessage(error, "导出失败。"));
     }

@@ -57,6 +57,7 @@ class AdaptivePlaybackService : Service() {
     private lateinit var playbackController: PlaybackController
     private lateinit var notificationController: NotificationController
     private lateinit var modeManager: AdaptiveModeManager
+    private lateinit var modeSwitchHaptics: ModeSwitchHaptics
 
     private var loadJob: Job? = null
     private var cachedPlaylist: List<LocalTrack> = emptyList()
@@ -105,6 +106,7 @@ class AdaptivePlaybackService : Service() {
             queueEngine = AppGraph.createQueueEngine(),
             playerConfig = playerConfig,
         )
+        modeSwitchHaptics = ModeSwitchHaptics(this)
         playbackController.setQueueMode(stateStore.state.value.playback.queueMode)
         heartRateController = AppGraph.createHeartRateController(
             threshold = stateStore.state.value.heartRate.thresholdBpm,
@@ -134,6 +136,10 @@ class AdaptivePlaybackService : Service() {
                 updateNotification()
             },
             onPublishDebugHeartRateSnapshot = ::publishDebugHeartRateSnapshot,
+            isModeSwitchFeedbackEnabled = {
+                stateStore.state.value.playback.isModeSwitchHapticsEnabled
+            },
+            onModeSwitchFeedback = modeSwitchHaptics::playModeSwitchFeedback,
         )
         notificationController = NotificationController(
             context = this,
@@ -209,6 +215,14 @@ class AdaptivePlaybackService : Service() {
                     intent.getIntExtra(
                         ServiceIntents.EXTRA_HEART_RATE_THRESHOLD,
                         stateStore.state.value.heartRate.thresholdBpm,
+                    )
+                )
+            }
+            ServiceIntents.ACTION_SET_MODE_SWITCH_HAPTICS_ENABLED -> {
+                updateModeSwitchHapticsEnabled(
+                    intent.getBooleanExtra(
+                        ServiceIntents.EXTRA_MODE_SWITCH_HAPTICS_ENABLED,
+                        stateStore.state.value.playback.isModeSwitchHapticsEnabled,
                     )
                 )
             }
@@ -366,6 +380,18 @@ class AdaptivePlaybackService : Service() {
         heartRateController.updateThreshold(savedThreshold, modeManager.currentMode)
         updatePlaybackSnapshot(
             getString(R.string.message_heart_rate_threshold, savedThreshold)
+        )
+    }
+
+    private fun updateModeSwitchHapticsEnabled(enabled: Boolean) {
+        preferencesRepository.saveModeSwitchHapticsEnabled(enabled)
+        stateStore.setModeSwitchHapticsEnabled(enabled)
+        updatePlaybackSnapshot(
+            if (enabled) {
+                getString(R.string.message_mode_switch_haptics_enabled)
+            } else {
+                getString(R.string.message_mode_switch_haptics_disabled)
+            }
         )
     }
 

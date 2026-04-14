@@ -17,11 +17,13 @@ object ServiceIntents {
     const val ACTION_VOLUME_DOWN = "com.runner.smartplayer.watch.action.VOLUME_DOWN"
     const val ACTION_CYCLE_QUEUE_MODE = "com.runner.smartplayer.watch.action.CYCLE_QUEUE_MODE"
     const val ACTION_SET_HEART_RATE_THRESHOLD = "com.runner.smartplayer.watch.action.SET_HEART_RATE_THRESHOLD"
+    const val ACTION_SET_MODE_SWITCH_HAPTICS_ENABLED = "com.runner.smartplayer.watch.action.SET_MODE_SWITCH_HAPTICS_ENABLED"
     const val ACTION_PLAY_TRACK_BY_ID = "com.runner.smartplayer.watch.action.PLAY_TRACK_BY_ID"
     const val EXTRA_ADAPTIVE_ENABLED = "adaptive_enabled"
     const val EXTRA_DEBUG_ENABLED = "debug_enabled"
     const val EXTRA_TRACK_ID = "track_id"
     const val EXTRA_HEART_RATE_THRESHOLD = "heart_rate_threshold"
+    const val EXTRA_MODE_SWITCH_HAPTICS_ENABLED = "mode_switch_haptics_enabled"
 
     fun send(
         context: Context,
@@ -29,12 +31,14 @@ object ServiceIntents {
         adaptiveEnabled: Boolean? = null,
         debugEnabled: Boolean? = null,
         heartRateThreshold: Int? = null,
+        modeSwitchHapticsEnabled: Boolean? = null,
     ) {
         val intent = Intent(context, AdaptivePlaybackService::class.java).apply {
             this.action = action
             adaptiveEnabled?.let { putExtra(EXTRA_ADAPTIVE_ENABLED, it) }
             debugEnabled?.let { putExtra(EXTRA_DEBUG_ENABLED, it) }
             heartRateThreshold?.let { putExtra(EXTRA_HEART_RATE_THRESHOLD, it) }
+            modeSwitchHapticsEnabled?.let { putExtra(EXTRA_MODE_SWITCH_HAPTICS_ENABLED, it) }
         }
         ContextCompat.startForegroundService(context, intent)
     }

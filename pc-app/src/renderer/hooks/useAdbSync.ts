@@ -45,7 +45,7 @@ export function useAdbSync({ libraryName, exportableTracks }: UseAdbSyncOptions)
 
       if (deviceList.length === 0) {
         setSelectedDeviceId("");
-        setDeviceStatus("未检测到 ADB 设备，请确认手表已连接并开启调试。");
+        setDeviceStatus("未检测到 ADB 设备，请确认手表已连接并开启调试；也可以先导出，再把手表切到 USB“传输文件”模式后手动放置 RunnerPlayerExport。");
         return;
       }
 
@@ -56,7 +56,7 @@ export function useAdbSync({ libraryName, exportableTracks }: UseAdbSyncOptions)
       setSelectedDeviceId(nextSelectedDeviceId);
       setDeviceStatus(`已检测到 ${deviceList.length} 台设备，可推送到 /sdcard/Music。`);
     } catch (error) {
-      setDeviceStatus(toErrorMessage(error, "读取设备列表失败。"));
+      setDeviceStatus(toErrorMessage(error, "读取设备列表失败。若本机未配置调试环境，请直接使用打包版内置 ADB。"));
     } finally {
       setIsRefreshingDevices(false);
     }
@@ -115,7 +115,7 @@ export function useAdbSync({ libraryName, exportableTracks }: UseAdbSyncOptions)
       setDeviceStatus(`已推送 ${result.pushedCount} 首歌曲到 ${result.remotePath}`);
       await loadRemoteMusic(selectedDeviceId, result.remotePath);
     } catch (error) {
-      setDeviceStatus(toErrorMessage(error, "ADB 推送失败。"));
+      setDeviceStatus(toErrorMessage(error, "ADB 推送失败。你也可以先导出，再切到 USB“传输文件”模式后手动放置文件。"));
     } finally {
       setIsPushingToDevice(false);
     }
@@ -152,7 +152,7 @@ export function useAdbSync({ libraryName, exportableTracks }: UseAdbSyncOptions)
       );
       await loadRemoteMusic(selectedDeviceId, result.remotePath);
     } catch (error) {
-      setDeviceStatus(toErrorMessage(error, "ADB 推送完整曲库失败。"));
+      setDeviceStatus(toErrorMessage(error, "ADB 推送完整曲库失败。你也可以先导出，再切到 USB“传输文件”模式后手动放置文件。"));
     } finally {
       setIsPushingRunnerExport(false);
     }
