@@ -2,6 +2,7 @@ package com.runner.smartplayer.watch.model
 
 import java.io.File
 import java.time.Instant
+import com.runner.smartplayer.watch.config.DEFAULT_HEART_RATE_THRESHOLD
 
 enum class TrackLabel {
     CALM,
@@ -44,6 +45,13 @@ enum class QueueMode {
         SHUFFLE -> "随机"
         LIST_LOOP -> "循环"
         SINGLE_REPEAT -> "单曲"
+    }
+
+    fun value(): String = name.lowercase()
+
+    companion object {
+        fun fromValue(value: String): QueueMode? =
+            entries.firstOrNull { it.value() == value.lowercase() }
     }
 }
 
@@ -103,6 +111,7 @@ data class HeartRateSnapshot(
     val mode: PlaybackMode = PlaybackMode.CALM,
     val availability: SensorAvailability = SensorAvailability.STOPPED,
     val message: String = "传感器已停止",
+    val thresholdBpm: Int = DEFAULT_HEART_RATE_THRESHOLD,
 )
 
 data class PlaybackSnapshot(

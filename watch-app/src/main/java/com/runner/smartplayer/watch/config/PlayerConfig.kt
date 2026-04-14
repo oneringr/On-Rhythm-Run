@@ -1,7 +1,12 @@
 package com.runner.smartplayer.watch.config
 
+const val DEFAULT_HEART_RATE_THRESHOLD = 160
+const val MIN_HEART_RATE_THRESHOLD = 100
+const val MAX_HEART_RATE_THRESHOLD = 220
+const val HEART_RATE_THRESHOLD_STEP = 5
+
 data class PlayerConfig(
-    val heartRateThreshold: Int = 180,
+    val heartRateThreshold: Int = DEFAULT_HEART_RATE_THRESHOLD,
     val stableSampleCount: Int = 10,
     val fadeSteps: Int = 12,
     val fadeStepDelayMs: Long = 50L,

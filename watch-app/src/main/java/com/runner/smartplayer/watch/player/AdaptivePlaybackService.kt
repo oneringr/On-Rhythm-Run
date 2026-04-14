@@ -21,6 +21,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.runner.smartplayer.watch.R
 import com.runner.smartplayer.watch.config.PlayerConfig
+import com.runner.smartplayer.watch.data.PlayerPreferencesRepository
 import com.runner.smartplayer.watch.data.ManifestLoadResult
 import com.runner.smartplayer.watch.data.ManifestRepository
 import com.runner.smartplayer.watch.model.LocalTrack
@@ -51,6 +52,7 @@ class AdaptivePlaybackService : Service() {
     private lateinit var stateStore: StateStore
     private lateinit var manifestRepository: ManifestRepository
     private lateinit var playerConfig: PlayerConfig
+    private lateinit var preferencesRepository: PlayerPreferencesRepository
     private lateinit var heartRateController: HeartRateController
     private lateinit var playbackController: PlaybackController
     private lateinit var notificationController: NotificationController
@@ -65,6 +67,7 @@ class AdaptivePlaybackService : Service() {
         stateStore = AppGraph.uiStateStore
         manifestRepository = AppGraph.manifestRepository
         playerConfig = AppGraph.playerConfig
+        preferencesRepository = AppGraph.playerPreferencesRepository
         audioManager = getSystemService(AudioManager::class.java)
         cachedVolumePercent = currentVolumePercent()
 
@@ -102,10 +105,14 @@ class AdaptivePlaybackService : Service() {
             queueEngine = AppGraph.createQueueEngine(),
             playerConfig = playerConfig,
         )
+        playbackController.setQueueMode(stateStore.state.value.playback.queueMode)
         heartRateController = AppGraph.createHeartRateController(
+            threshold = stateStore.state.value.heartRate.thresholdBpm,
             onHeartRateSnapshot = { snapshot ->
                 if (!modeManager.debugModeEnabled) {
-                    stateStore.updateHeartRate { snapshot }
+                    stateStore.updateHeartRate { current ->
+                        snapshot.copy(thresholdBpm = current.thresholdBpm)
+                    }
                 }
             },
             onStableModeChanged = { mode ->
@@ -191,9 +198,18 @@ class AdaptivePlaybackService : Service() {
             }
             ServiceIntents.ACTION_CYCLE_QUEUE_MODE -> {
                 playbackController.cycleQueueMode()
+                preferencesRepository.saveQueueMode(playbackController.queueMode)
                 refreshPlaylistCache()
                 updatePlaybackSnapshot(
                     getString(R.string.message_queue_mode, playbackController.queueMode.label())
+                )
+            }
+            ServiceIntents.ACTION_SET_HEART_RATE_THRESHOLD -> {
+                updateHeartRateThreshold(
+                    intent.getIntExtra(
+                        ServiceIntents.EXTRA_HEART_RATE_THRESHOLD,
+                        stateStore.state.value.heartRate.thresholdBpm,
+                    )
                 )
             }
             ServiceIntents.ACTION_PLAY_TRACK_BY_ID -> {
@@ -342,6 +358,15 @@ class AdaptivePlaybackService : Service() {
                 message = message,
             )
         }
+    }
+
+    private fun updateHeartRateThreshold(threshold: Int) {
+        val savedThreshold = preferencesRepository.saveHeartRateThreshold(threshold)
+        stateStore.setHeartRateThreshold(savedThreshold)
+        heartRateController.updateThreshold(savedThreshold, modeManager.currentMode)
+        updatePlaybackSnapshot(
+            getString(R.string.message_heart_rate_threshold, savedThreshold)
+        )
     }
 
     private suspend fun switchTrackWithFade(track: LocalTrack?, reason: String) {

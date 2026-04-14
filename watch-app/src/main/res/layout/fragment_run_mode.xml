@@ -10,28 +10,71 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/adaptiveModeButton"
-            style="@style/Widget.MaterialComponents.Button"
-            android:layout_width="match_parent"
-            android:layout_height="38dp"
-            android:text="@string/adaptive_mode_enabled"
-            android:textAllCaps="false"
-            android:textColor="@color/mint"
-            app:backgroundTint="@color/surface_alt"
-            app:cornerRadius="14dp" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/heart_rate_threshold_title"
+            android:textColor="@color/slate"
+            android:textSize="11sp" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/debugModeButton"
-            style="@style/Widget.MaterialComponents.Button"
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="38dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/player_panel_background"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="10dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/thresholdDecreaseButton"
+                style="@style/Widget.MaterialComponents.Button"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:contentDescription="@string/decrease_threshold"
+                android:minWidth="0dp"
+                android:text="-5"
+                android:textAllCaps="false"
+                android:textColor="@color/mint"
+                app:backgroundTint="@color/surface_alt"
+                app:cornerRadius="14dp" />
+
+            <TextView
+                android:id="@+id/heartRateThresholdValue"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="12dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="@string/heart_rate_threshold_value_default"
+                android:textColor="@color/foam"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/thresholdIncreaseButton"
+                style="@style/Widget.MaterialComponents.Button"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:contentDescription="@string/increase_threshold"
+                android:minWidth="0dp"
+                android:text="+5"
+                android:textAllCaps="false"
+                android:textColor="@color/mint"
+                app:backgroundTint="@color/surface_alt"
+                app:cornerRadius="14dp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/heartRateThresholdDescription"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
-            android:text="@string/debug_mode_disabled"
-            android:textAllCaps="false"
-            android:textColor="@color/mint"
-            app:backgroundTint="@color/surface_alt"
-            app:cornerRadius="14dp" />
+            android:background="@drawable/player_panel_background"
+            android:padding="12dp"
+            android:text="@string/threshold_description_dynamic_default"
+            android:textColor="@color/foam"
+            android:textSize="12sp" />
 
         <TextView
             android:layout_width="wrap_content"
@@ -80,6 +123,30 @@
             android:textColor="@color/foam"
             android:textSize="12sp" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/adaptiveModeButton"
+            style="@style/Widget.MaterialComponents.Button"
+            android:layout_width="match_parent"
+            android:layout_height="38dp"
+            android:layout_marginTop="12dp"
+            android:text="@string/adaptive_mode_enabled"
+            android:textAllCaps="false"
+            android:textColor="@color/mint"
+            app:backgroundTint="@color/surface_alt"
+            app:cornerRadius="14dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/debugModeButton"
+            style="@style/Widget.MaterialComponents.Button"
+            android:layout_width="match_parent"
+            android:layout_height="38dp"
+            android:layout_marginTop="10dp"
+            android:text="@string/debug_mode_disabled"
+            android:textAllCaps="false"
+            android:textColor="@color/mint"
+            app:backgroundTint="@color/surface_alt"
+            app:cornerRadius="14dp" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -87,16 +154,6 @@
             android:background="@drawable/player_panel_background"
             android:padding="12dp"
             android:text="@string/debug_mode_description"
-            android:textColor="@color/foam"
-            android:textSize="12sp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/player_panel_background"
-            android:padding="12dp"
-            android:text="@string/threshold_description"
             android:textColor="@color/foam"
             android:textSize="12sp" />
     </LinearLayout>

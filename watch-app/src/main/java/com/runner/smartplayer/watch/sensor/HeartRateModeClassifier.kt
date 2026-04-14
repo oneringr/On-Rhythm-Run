@@ -4,7 +4,7 @@ import com.runner.smartplayer.watch.config.DEFAULT_PLAYER_CONFIG
 import com.runner.smartplayer.watch.model.PlaybackMode
 
 class HeartRateModeClassifier(
-    private val threshold: Int = DEFAULT_PLAYER_CONFIG.heartRateThreshold,
+    private var threshold: Int = DEFAULT_PLAYER_CONFIG.heartRateThreshold,
     private val stableSamples: Int = DEFAULT_PLAYER_CONFIG.stableSampleCount,
 ) {
     private var aboveThresholdCount = 0
@@ -12,6 +12,8 @@ class HeartRateModeClassifier(
     private var currentMode: PlaybackMode = PlaybackMode.CALM
 
     fun currentMode(): PlaybackMode = currentMode
+
+    fun currentThreshold(): Int = threshold
 
     fun submitSample(bpm: Int?, sensorReady: Boolean): PlaybackMode? {
         if (!sensorReady || bpm == null) {
@@ -43,5 +45,10 @@ class HeartRateModeClassifier(
         currentMode = mode
         aboveThresholdCount = 0
         belowThresholdCount = 0
+    }
+
+    fun updateThreshold(threshold: Int, mode: PlaybackMode = currentMode) {
+        this.threshold = threshold
+        reset(mode)
     }
 }

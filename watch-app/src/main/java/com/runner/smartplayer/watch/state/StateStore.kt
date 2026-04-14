@@ -5,6 +5,7 @@ import com.runner.smartplayer.watch.model.HeartRateSnapshot
 import com.runner.smartplayer.watch.model.LibrarySummary
 import com.runner.smartplayer.watch.model.PlaybackMode
 import com.runner.smartplayer.watch.model.PlaybackSnapshot
+import com.runner.smartplayer.watch.model.QueueMode
 import kotlinx.coroutines.flow.StateFlow
 
 interface StateStore {
@@ -17,4 +18,6 @@ interface StateStore {
     fun setAdaptiveEnabled(enabled: Boolean)
     fun setDebugModeEnabled(enabled: Boolean)
     fun setPlaybackMode(mode: PlaybackMode)
+    fun setQueueMode(mode: QueueMode)
+    fun setHeartRateThreshold(threshold: Int)
 }

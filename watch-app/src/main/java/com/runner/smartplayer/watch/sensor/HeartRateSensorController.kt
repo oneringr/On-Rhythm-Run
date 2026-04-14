@@ -24,6 +24,7 @@ class HeartRateSensorController(
     private val heartRateSensor = sensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE)
     private var sensorAccuracy: Int = SensorManager.SENSOR_STATUS_UNRELIABLE
     private var started = false
+    private var lastBpm: Int? = null
 
     override fun start() {
         when {
@@ -49,6 +50,7 @@ class HeartRateSensorController(
             sensorManager.unregisterListener(this)
             started = false
         }
+        lastBpm = null
         publishSnapshot(null, SensorAvailability.STOPPED)
     }
 
@@ -56,8 +58,14 @@ class HeartRateSensorController(
         classifier.reset(mode)
     }
 
+    override fun updateThreshold(threshold: Int, mode: PlaybackMode) {
+        classifier.updateThreshold(threshold, mode)
+        publishSnapshot(lastBpm, currentAvailability())
+    }
+
     override fun onSensorChanged(event: SensorEvent?) {
         val bpm = event?.values?.firstOrNull()?.roundToInt()
+        lastBpm = bpm
         val availability = when (sensorAccuracy) {
             SensorManager.SENSOR_STATUS_NO_CONTACT -> SensorAvailability.NO_CONTACT
             SensorManager.SENSOR_STATUS_UNRELIABLE -> SensorAvailability.UNRELIABLE
@@ -75,12 +83,7 @@ class HeartRateSensorController(
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
         sensorAccuracy = accuracy
-        val availability = when (accuracy) {
-            SensorManager.SENSOR_STATUS_NO_CONTACT -> SensorAvailability.NO_CONTACT
-            SensorManager.SENSOR_STATUS_UNRELIABLE -> SensorAvailability.UNRELIABLE
-            else -> SensorAvailability.AVAILABLE
-        }
-        publishSnapshot(null, availability)
+        publishSnapshot(lastBpm, currentAvailability())
     }
 
     private fun publishSnapshot(bpm: Int?, availability: SensorAvailability) {
@@ -101,6 +104,17 @@ class HeartRateSensorController(
         SensorAvailability.NO_CONTACT -> "手表未贴合手腕"
         SensorAvailability.UNRELIABLE -> "传感器信号不稳定"
         SensorAvailability.STOPPED -> "传感器已停止"
+    }
+
+    private fun currentAvailability(): SensorAvailability {
+        return when {
+            !hasPermission() -> SensorAvailability.PERMISSION_REQUIRED
+            heartRateSensor == null -> SensorAvailability.NO_SENSOR
+            !started -> SensorAvailability.STOPPED
+            sensorAccuracy == SensorManager.SENSOR_STATUS_NO_CONTACT -> SensorAvailability.NO_CONTACT
+            sensorAccuracy == SensorManager.SENSOR_STATUS_UNRELIABLE -> SensorAvailability.UNRELIABLE
+            else -> SensorAvailability.AVAILABLE
+        }
     }
 
     private fun hasPermission(): Boolean {

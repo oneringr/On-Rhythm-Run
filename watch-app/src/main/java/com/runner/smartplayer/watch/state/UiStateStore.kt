@@ -5,13 +5,22 @@ import com.runner.smartplayer.watch.model.HeartRateSnapshot
 import com.runner.smartplayer.watch.model.LibrarySummary
 import com.runner.smartplayer.watch.model.PlaybackMode
 import com.runner.smartplayer.watch.model.PlaybackSnapshot
+import com.runner.smartplayer.watch.model.QueueMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
-class UiStateStore : StateStore {
-    private val mutableState = MutableStateFlow(AppUiState())
+class UiStateStore(
+    initialQueueMode: QueueMode = QueueMode.SHUFFLE,
+    initialHeartRateThreshold: Int = 160,
+) : StateStore {
+    private val mutableState = MutableStateFlow(
+        AppUiState(
+            playback = PlaybackSnapshot(queueMode = initialQueueMode),
+            heartRate = HeartRateSnapshot(thresholdBpm = initialHeartRateThreshold),
+        )
+    )
     override val state: StateFlow<AppUiState> = mutableState.asStateFlow()
 
     // Write ownership is explicit:
@@ -51,5 +60,13 @@ class UiStateStore : StateStore {
                 heartRate = current.heartRate.copy(mode = mode),
             )
         }
+    }
+
+    override fun setQueueMode(mode: QueueMode) {
+        updatePlayback { it.copy(queueMode = mode) }
+    }
+
+    override fun setHeartRateThreshold(threshold: Int) {
+        updateHeartRate { it.copy(thresholdBpm = threshold) }
     }
 }

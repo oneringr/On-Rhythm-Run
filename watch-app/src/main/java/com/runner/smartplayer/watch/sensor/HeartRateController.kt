@@ -6,4 +6,5 @@ interface HeartRateController {
     fun start()
     fun stop()
     fun resetClassifier(mode: PlaybackMode = PlaybackMode.CALM)
+    fun updateThreshold(threshold: Int, mode: PlaybackMode)
 }

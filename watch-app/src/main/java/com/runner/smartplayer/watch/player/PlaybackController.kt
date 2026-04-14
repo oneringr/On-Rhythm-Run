@@ -42,7 +42,11 @@ class PlaybackController(
     }
 
     fun cycleQueueMode() {
-        queueMode = queueMode.next()
+        setQueueMode(queueMode.next())
+    }
+
+    fun setQueueMode(mode: QueueMode) {
+        queueMode = mode
         if (queueMode == QueueMode.SHUFFLE) {
             queueEngine.reshuffleAll(currentTrack)
         }

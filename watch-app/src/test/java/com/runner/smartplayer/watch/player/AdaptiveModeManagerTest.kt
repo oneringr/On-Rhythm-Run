@@ -212,5 +212,7 @@ class AdaptiveModeManagerTest {
         override fun resetClassifier(mode: PlaybackMode) {
             resetCalls += 1
         }
+
+        override fun updateThreshold(threshold: Int, mode: PlaybackMode) = Unit
     }
 }

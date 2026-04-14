@@ -20,7 +20,13 @@
     <string name="volume_up">增大音量</string>
     <string name="volume_icon">音量</string>
     <string name="track_not_ready">尚未载入歌曲</string>
-    <string name="threshold_description">心率连续 10 个稳定样本达到或超过 180 BPM 时切换到激动模式。</string>
+    <string name="heart_rate_threshold_title">切换心率</string>
+    <string name="heart_rate_threshold_value">%1$d BPM</string>
+    <string name="heart_rate_threshold_value_default">160 BPM</string>
+    <string name="threshold_description_dynamic">心率连续 %1$d 个稳定样本达到或超过 %2$d BPM 时切换到激动模式。</string>
+    <string name="threshold_description_dynamic_default">心率连续 10 个稳定样本达到或超过 160 BPM 时切换到激动模式。</string>
+    <string name="decrease_threshold">降低切换心率</string>
+    <string name="increase_threshold">提高切换心率</string>
     <string name="debug_mode_description">启用后停止读取传感器数据，长按播放页主按钮可手动切换舒缓 / 激动。</string>
     <string name="debug_mode_enabled">Debug：已开启</string>
     <string name="debug_mode_disabled">Debug：已关闭</string>
@@ -67,6 +73,7 @@
     <string name="message_debug_switched_mode_no_adaptive">已切换到%1$s模式（自适应未开启，不影响播放）</string>
     <string name="message_no_tracks_for_label">当前没有%1$s歌曲可播放</string>
     <string name="message_debug_heart_rate">Debug 模式已启用，长按播放键切换舒缓/激动</string>
+    <string name="message_heart_rate_threshold">切换心率：%1$d BPM</string>
     <string name="message_no_tracks_available">当前没有可播放的歌曲</string>
     <string name="message_track_not_found">未找到对应歌曲</string>
     <string name="message_jump_to_track">已切换到：%1$s</string>
